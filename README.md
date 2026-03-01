@@ -41,6 +41,16 @@ Relationship types span `uses`, `extends`, `alternative_to`, `component_of`, `re
 - A [MotherDuck](https://motherduck.com) account (free tier works)
 - OpenAI API key (for embeddings used by `ask_book`)
 
+### Database Access
+
+The knowledge graph is hosted on MotherDuck and shared publicly. Attach it in your MotherDuck session:
+
+```sql
+ATTACH 'md:_share/Iconsult_share/793b6b5a-8eb3-4b0d-bb04-94542d6303a2';
+```
+
+The share updates automatically when the underlying database changes.
+
 ### Install
 
 ```bash
@@ -50,7 +60,7 @@ pip install -e .
 ### Environment Variables
 
 ```bash
-export MOTHERDUCK_TOKEN="your-token"    # Required — database
+export MOTHERDUCK_TOKEN="your-token"    # Required — database (attach the shared database above)
 export OPENAI_API_KEY="sk-..."          # Required — embeddings for ask_book
 ```
 
