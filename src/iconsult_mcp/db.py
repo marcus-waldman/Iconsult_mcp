@@ -13,6 +13,7 @@ import duckdb
 from iconsult_mcp.config import (
     EMBEDDING_DIMENSIONS,
     MOTHERDUCK_DATABASE,
+    MOTHERDUCK_SHARE_URL,
     get_motherduck_token,
 )
 
@@ -20,11 +21,17 @@ logger = logging.getLogger(__name__)
 
 _connection: Optional[duckdb.DuckDBPyConnection] = None
 _vss_available: bool = False
+_is_share: bool = False
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
-    """Get or create MotherDuck DuckDB connection (singleton)."""
-    global _connection
+    """Get or create MotherDuck DuckDB connection (singleton).
+
+    Tries to connect as the database owner first. If that fails (e.g. the
+    user doesn't own the database), falls back to attaching the public share
+    in read-only mode.
+    """
+    global _connection, _is_share
     if _connection is None:
         token = get_motherduck_token()
         if not token:
@@ -32,8 +39,16 @@ def get_connection() -> duckdb.DuckDBPyConnection:
                 "MOTHERDUCK_TOKEN environment variable is not set. "
                 "Get a token from https://app.motherduck.com/settings"
             )
-        _connection = duckdb.connect(f"md:{MOTHERDUCK_DATABASE}?motherduck_token={token}")
-        _init_schema(_connection)
+        try:
+            _connection = duckdb.connect(f"md:{MOTHERDUCK_DATABASE}?motherduck_token={token}")
+            _is_share = False
+            _init_schema(_connection)
+        except Exception as e:
+            logger.info(f"Could not open database directly ({e}), attaching public share")
+            _connection = duckdb.connect(f"md:?motherduck_token={token}")
+            _connection.execute(f"ATTACH 'md:{MOTHERDUCK_SHARE_URL}'")
+            _connection.execute(f"USE {MOTHERDUCK_DATABASE}")
+            _is_share = True
     return _connection
 
 

@@ -22,6 +22,7 @@ def get_anthropic_api_key() -> str | None:
 
 # Database
 MOTHERDUCK_DATABASE = os.environ.get("ICONSULT_DB", "Iconsult")
+MOTHERDUCK_SHARE_URL = "_share/Iconsult_share/793b6b5a-8eb3-4b0d-bb04-94542d6303a2"
 
 # Embeddings
 EMBEDDING_MODEL = "text-embedding-3-small"
