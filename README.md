@@ -12,9 +12,16 @@ Iconsult is an MCP server that acts as a technical architecture advisor for mult
 
 | Tool | What it does |
 |------|-------------|
-| `consult` | Describe your architecture problem, get pattern recommendations with provenance |
-| `explore_graph` | Browse the knowledge graph — search concepts, find neighbors, trace paths |
+| `list_concepts` | Browse all 138 concepts in the knowledge graph — your entry point for mapping patterns to concept IDs |
+| `get_subgraph` | Traverse the graph from seed concepts — discovers alternatives, prerequisites, conflicts, and complements |
+| `ask_book` | RAG search against the book — returns passages with chapter, page numbers, and full text |
 | `health_check` | Verify the server is running and the graph is intact |
+
+### Prompt
+
+| Prompt | What it does |
+|--------|-------------|
+| `consult` | Kick off a full architecture consultation — provide your project context and get the guided workflow |
 
 ### The Knowledge Graph
 
@@ -30,7 +37,7 @@ Relationship types span `uses`, `extends`, `alternative_to`, `component_of`, `re
 
 - Python 3.10+
 - A [MotherDuck](https://motherduck.com) account (free tier works)
-- OpenAI API key (for embeddings)
+- OpenAI API key (for embeddings used by `ask_book`)
 
 ### Install
 
@@ -42,13 +49,12 @@ pip install -e .
 
 ```bash
 export MOTHERDUCK_TOKEN="your-token"    # Required — database
-export OPENAI_API_KEY="sk-..."          # Required — embeddings
-export ANTHROPIC_API_KEY="sk-ant-..."   # Required — pipeline extraction only
+export OPENAI_API_KEY="sk-..."          # Required — embeddings for ask_book
 ```
 
 ### MCP Configuration
 
-Add to your Claude Desktop or Claude Code config:
+Add to your Claude Desktop config (`claude_desktop_config.json`) or Claude Code settings:
 
 ```json
 {
@@ -70,52 +76,92 @@ Add to your Claude Desktop or Claude Code config:
 iconsult-mcp --check
 ```
 
-## Pipeline
+## Usage Example
 
-The knowledge graph is built in phases from the source book. You don't need to run this unless you're rebuilding from scratch.
+Here's what a typical consultation looks like. You describe your architecture problem, and Claude uses the knowledge graph to deliver grounded, project-specific advice.
 
-```bash
-py scripts/run_pipeline.py              # Run all phases
-py scripts/run_pipeline.py --phase 3c   # Run a specific sub-phase
-py scripts/run_pipeline.py --reset      # Burn it all down and start over
+---
+
+**You:**
+
+> I'm building a customer support system where multiple AI agents handle tickets — one triages, one looks up knowledge base articles, and one drafts responses. They're all independent right now and I'm having coordination problems. Can you help me improve the architecture?
+
+**Claude:**
+
+Let me start by reading your codebase to understand the current setup.
+
+*\[Reads project files — finds `triage_agent.py`, `kb_agent.py`, `response_agent.py`, `main.py` with a simple round-robin dispatcher\]*
+
+I can see you have three independent agents dispatched via round-robin in `main.py:42`. There's no shared state or coordination — each agent fires and forgets. Let me map this to the knowledge graph.
+
+*\[Calls `list_concepts` — scans the 138 concepts, identifies matches\]*
+
+Your setup maps to several concepts:
+- `c_047` Multi-Agent Orchestration
+- `c_031` Task Routing Pattern
+- `c_089` Agent Specialization
+
+Let me explore what the graph says about improving coordination.
+
+*\[Calls `get_subgraph(concept_ids=["c_047", "c_031", "c_089"], max_hops=2)`\]*
+
+Interesting findings from the graph:
+- `c_047` → **requires** → `c_052` (Shared Memory / Blackboard)
+- `c_047` → **alternative_to** → `c_061` (Hierarchical Delegation)
+- `c_031` → **extends** → `c_033` (Semantic Router)
+- `c_089` → **complements** → `c_055` (Agent Communication Protocol)
+- `c_061` → **conflicts_with** → `c_072` (Fully Decentralized Swarm)
+
+Your round-robin dispatcher is a basic Task Router (`c_031`), but you're missing the Shared Memory (`c_052`) that Multi-Agent Orchestration *requires*. Let me get the book's guidance.
+
+*\[Calls `ask_book(question="How should agents share state in an orchestrated multi-agent system?", concept_ids=["c_047", "c_052", "c_055"])`\]*
+
+Based on the book (Chapter 7, pp. 184–189):
+
+> "An orchestrated multi-agent system without shared state degenerates into parallel independent execution — agents cannot build on each other's work."
+
+Here's my recommendation:
+
+**Before:**
+```
+┌──────────┐     ┌──────────────┐
+│  Ticket  │────▶│  Round-Robin  │
+│  Queue   │     │  Dispatcher   │
+└──────────┘     └──────┬───────┘
+                   ┌────┼────┐
+                   ▼    ▼    ▼
+               Triage  KB  Response
+               Agent  Agent  Agent
+              (independent, no shared state)
 ```
 
-| Phase | What it does |
-|-------|-------------|
-| 1a | Parse book index into concepts |
-| 1b | Parse book into sections |
-| 2 | Tag concepts to sections (Claude) |
-| 3a | Explicit relationships per chapter (Claude) |
-| 3b | Semantic similarity pairs (embeddings + Claude) |
-| 3c | Cross-chapter knowledge-based relationships (Claude) |
-| 3d | Cross-chapter semantic pairs (embeddings + Claude) |
-| 3e | Summary-based structural relationships (Claude) |
-| 4 | Deduplicate, validate, embed, finalize |
-
-## Architecture
-
+**After:**
 ```
-src/iconsult_mcp/
-  server.py          MCP server entry point
-  config.py          Environment + paths
-  db.py              DuckDB/MotherDuck connection + schema
-  embed.py           OpenAI embeddings + Claude API (raw urllib)
-  tools/
-    consult.py       Pattern recommendation engine
-    explore.py       Graph exploration
-    health.py        Health check
-
-scripts/
-  run_pipeline.py    Pipeline orchestrator
-  parse_index.py     Phase 1a
-  parse_book.py      Phase 1b
-  tag_concepts.py    Phase 2
-  discover_relationships.py   Phases 3a–3e
-  build_graph.py     Phase 4
+┌──────────┐     ┌──────────────┐     ┌───────────┐
+│  Ticket  │────▶│  Semantic     │────▶│ Blackboard│
+│  Queue   │     │  Router       │     │ (shared   │
+└──────────┘     └──────┬───────┘     │  state)   │
+                   ┌────┼────┐        └─────┬─────┘
+                   ▼    ▼    ▼          read/write
+               Triage  KB  Response ◀───────┘
+               Agent  Agent  Agent
+              (coordinated via blackboard)
 ```
 
-DuckDB on MotherDuck for storage. OpenAI `text-embedding-3-small` (1536 dims) for semantic search. Claude for extraction. All HTTP calls go through `urllib` to avoid asyncio deadlocks in the MCP event loop.
+**Specific changes:**
+1. **`main.py:42`** — Replace round-robin with a Semantic Router (`c_033`) that routes by ticket intent, not rotation
+2. **New `blackboard.py`** — Add a shared state store so Triage writes classification, KB reads it to scope search, and Response reads both to draft with context
+3. **`response_agent.py:15`** — Read triage classification + KB articles from blackboard before drafting
 
+**Prerequisites met:** Your agents are already specialized (`c_089`) ✓
+**Conflict check:** No conflicts — blackboard is compatible with all your current patterns ✓
+**Alternative considered:** Hierarchical Delegation (`c_061`) would also work but adds a supervisor agent you don't need yet at this scale.
+
+Want me to dive deeper into any of these changes?
+
+---
+
+Every recommendation traces back to the book. Every pattern gets checked for prerequisites and conflicts. No hallucinated best practices — just the graph.
 
 ## License
 
