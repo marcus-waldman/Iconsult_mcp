@@ -31,6 +31,8 @@ Iconsult is an MCP server that acts as a technical architecture advisor for mult
 
 Relationship types span `uses`, `extends`, `alternative_to`, `component_of`, `requires`, `enables`, `complements`, `specializes`, `precedes`, and `conflicts_with` — discovered through five extraction phases including cross-chapter semantic analysis.
 
+**[Explore the interactive knowledge graph →](https://marcus-waldman.github.io/Iconsult_mcp/)**
+
 ## Setup
 
 ### Prerequisites
