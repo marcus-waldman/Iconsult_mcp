@@ -23,7 +23,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `ANTHROPIC_API_KEY` — required for extraction pipeline
 
 ## Database
-- MotherDuck database name: `iconsult` (override with `ICONSULT_DB` env var)
+- MotherDuck database name: `Iconsult` (override with `ICONSULT_DB` env var)
 - 6 tables + 1 metadata table (see db.py schema)
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
 
