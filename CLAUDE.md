@@ -41,7 +41,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 2. MAP TO CONCEPTS — `list_concepts` to match patterns to concept IDs
 3. TRAVERSE GRAPH — `get_subgraph` to discover what's missing via relationship types
 4. RETRIEVE PASSAGES — `ask_book` scoped to discovered concept IDs
-5. SYNTHESIZE — before/after diagrams, file-level changes, citations, prerequisite/conflict checks
+5. SYNTHESIZE — before/after diagrams via `/generate-web-diagram` skill (HTML+Mermaid; ASCII only for <5 nodes), file-level changes, citations, prerequisite/conflict checks; comparison tables with 4+ rows rendered as HTML
 
 ## Literature
 - Book markdown: `literature/Arsanjani and Bustos - 2026 - ....md`

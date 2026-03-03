@@ -52,11 +52,14 @@ step 3. This retrieves actual book text with chapter/page citations.
 
 5. **SYNTHESIZE** — Deliver project-specific recommendations:
    - Ground every recommendation in the user's specific files and code
-   - Present before/after ASCII architecture diagrams showing the proposed changes
+   - Render before/after architecture diagrams using the `/generate-web-diagram` skill \
+(writes a self-contained HTML file with Mermaid; opens in browser). Only fall back to \
+ASCII if the diagram has fewer than ~5 nodes and no edge labels.
    - Cite book passages with chapter and page numbers
    - Check `requires` edges — flag missing prerequisites
    - Check `conflicts_with` edges — warn about incompatibilities
-   - Compare alternatives using `alternative_to` edges with pros/cons
+   - Compare alternatives using `alternative_to` edges with pros/cons. For comparisons \
+with 4+ rows or 3+ columns, use `/generate-web-diagram` to render as a styled HTML table.
 
 ## Rules
 - Never recommend patterns without first checking prerequisites and conflicts.
@@ -254,10 +257,12 @@ enables, extends) to discover related patterns and reason about fit.
 IDs for authoritative guidance. Cite chapter and page numbers.
 
 5. **Synthesize recommendations** — Deliver:
-   - Before/after ASCII architecture diagrams
+   - Before/after architecture diagrams rendered with `/generate-web-diagram` (HTML + \
+Mermaid, opens in browser). Use ASCII only for trivial diagrams with fewer than ~5 nodes.
    - Specific file-level changes mapped to my codebase
    - Prerequisites check (requires edges) and conflict warnings (conflicts_with edges)
-   - Comparison of alternatives if multiple approaches exist
+   - Comparison of alternatives if multiple approaches exist — render as HTML table via \
+`/generate-web-diagram` when the table has 4+ rows or 3+ columns
    - Book citations with chapter, page, and brief quotes""",
                 ),
             ),

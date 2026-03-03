@@ -40,10 +40,23 @@ Relationship types span `uses`, `extends`, `alternative_to`, `component_of`, `re
 - Python 3.10+
 - A [MotherDuck](https://motherduck.com) account (free tier works)
 - OpenAI API key (for embeddings used by `ask_book`)
+- **Claude Code** with the [visual-explainer](https://github.com/nicobailon/visual-explainer) skill installed (required for architecture diagram rendering — see below)
 
 ### Database Access
 
 The knowledge graph is hosted on MotherDuck and shared publicly. The server automatically detects whether you own the database or need to attach the public share — no extra configuration needed. Just provide your MotherDuck token and it works.
+
+### Install visual-explainer (Claude Code skill)
+
+Iconsult renders architecture diagrams as interactive HTML pages using the [visual-explainer](https://github.com/nicobailon/visual-explainer) skill. Install it once:
+
+```bash
+git clone https://github.com/nicobailon/visual-explainer.git ~/.claude/skills/visual-explainer
+mkdir -p ~/.claude/commands
+cp ~/.claude/skills/visual-explainer/prompts/*.md ~/.claude/commands/
+```
+
+This gives Claude Code the `/generate-web-diagram` command used during consultations. Diagrams are written to `~/.agent/diagrams/` and opened in your browser automatically.
 
 ### Install
 
@@ -128,30 +141,34 @@ Based on the book (Chapter 7, pp. 184–189):
 
 Here's my recommendation:
 
+*\[Calls `/generate-web-diagram` — generates a self-contained HTML file with Mermaid diagrams and opens it in the browser\]*
+
 **Before:**
-```
-┌──────────┐     ┌──────────────┐
-│  Ticket  │────▶│  Round-Robin  │
-│  Queue   │     │  Dispatcher   │
-└──────────┘     └──────┬───────┘
-                   ┌────┼────┐
-                   ▼    ▼    ▼
-               Triage  KB  Response
-               Agent  Agent  Agent
-              (independent, no shared state)
+
+```mermaid
+graph LR
+    TQ[Ticket Queue] --> RR[Round-Robin Dispatcher]
+    RR --> TA[Triage Agent]
+    RR --> KB[KB Agent]
+    RR --> RA[Response Agent]
+
+    style TA fill:#fca5a5,stroke:#ef4444
+    style KB fill:#fca5a5,stroke:#ef4444
+    style RA fill:#fca5a5,stroke:#ef4444
 ```
 
 **After:**
-```
-┌──────────┐     ┌──────────────┐     ┌───────────┐
-│  Ticket  │────▶│  Semantic     │────▶│ Blackboard│
-│  Queue   │     │  Router       │     │ (shared   │
-└──────────┘     └──────┬───────┘     │  state)   │
-                   ┌────┼────┐        └─────┬─────┘
-                   ▼    ▼    ▼          read/write
-               Triage  KB  Response ◀───────┘
-               Agent  Agent  Agent
-              (coordinated via blackboard)
+
+```mermaid
+graph LR
+    TQ[Ticket Queue] --> SR[Semantic Router]
+    SR --> BB[(Blackboard)]
+    BB <--> TA[Triage Agent]
+    BB <--> KB[KB Agent]
+    BB <--> RA[Response Agent]
+
+    style BB fill:#93c5fd,stroke:#3b82f6
+    style SR fill:#86efac,stroke:#22c55e
 ```
 
 **Specific changes:**
