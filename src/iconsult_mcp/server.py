@@ -32,11 +32,13 @@ concepts, their relationships, and full book text.
 ## Consulting Workflow
 
 1. **READ PROJECT** — Always read the user's codebase first. Understand their \
-current architecture, tech stack, and pain points before consulting the graph.
+current architecture, tech stack, and pain points before consulting the graph. \
+Then narrate in 1-2 sentences: what you found and what the core problem is.
 
 2. **MAP TO CONCEPTS** — Call `list_concepts` to browse the full catalogue. Match \
 what you see in the user's code to concept IDs (patterns, frameworks, components \
-they already use or should consider).
+they already use or should consider). \
+Then narrate in 1-2 sentences: which concepts matched and why they fit.
 
 3. **TRAVERSE GRAPH** — Call `get_subgraph` with matched concept IDs. The graph is \
 your query planner. Use relationship types to reason about fit:
@@ -46,9 +48,12 @@ your query planner. Use relationship types to reason about fit:
    - `requires` / `precedes` / `enables` — prerequisites and sequencing
    - `conflicts_with` — incompatibilities to flag
    - `complements` — patterns that work well together
+   Then narrate in 1-2 sentences: the single most significant finding — a missing \
+prerequisite, a conflict, or an alternative worth considering.
 
 4. **RETRIEVE PASSAGES** — Call `ask_book` scoped to concept IDs discovered in \
-step 3. This retrieves actual book text with chapter/page citations.
+step 3. This retrieves actual book text with chapter/page citations. \
+Then narrate in 1-2 sentences: the key insight the book provides.
 
 5. **SYNTHESIZE** — Deliver project-specific recommendations:
    - Ground every recommendation in the user's specific files and code
@@ -243,18 +248,21 @@ I need architecture consulting for my project. Here is my context:
 Please follow this workflow:
 
 1. **Read my codebase** — Examine my project files to understand the current \
-architecture, tech stack, and patterns in use.
+architecture, tech stack, and patterns in use. Then tell me in 1-2 sentences \
+what you found and what you see as the core problem.
 
 2. **Map to concepts** — Call `list_concepts` to browse the knowledge graph \
 catalogue. Identify which concepts match patterns I already use and which ones \
-might address my needs.
+might address my needs. Then tell me in 1-2 sentences which concepts matched.
 
 3. **Traverse the graph** — Call `get_subgraph` with the matched concept IDs. \
 Use the relationship types (alternative_to, requires, conflicts_with, complements, \
-enables, extends) to discover related patterns and reason about fit.
+enables, extends) to discover related patterns and reason about fit. Then tell me \
+in 1-2 sentences the single most significant finding from the graph.
 
 4. **Retrieve book passages** — Call `ask_book` scoped to the discovered concept \
-IDs for authoritative guidance. Cite chapter and page numbers.
+IDs for authoritative guidance. Cite chapter and page numbers. Then tell me in \
+1-2 sentences the key insight the book provides.
 
 5. **Synthesize recommendations** — Deliver:
    - Before/after architecture diagrams rendered with `/generate-web-diagram` (HTML + \
