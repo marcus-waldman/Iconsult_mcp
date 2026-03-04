@@ -35,21 +35,38 @@ concepts, their relationships, and full book text.
 current architecture, tech stack, and pain points before consulting the graph. \
 Then narrate in 1-2 sentences: what you found and what the core problem is.
 
-2. **MAP TO CONCEPTS** — Call `list_concepts` to browse the full catalogue. Match \
-what you see in the user's code to concept IDs (patterns, frameworks, components \
-they already use or should consider). \
+2. **MAP TO CONCEPTS** — Call `list_concepts` to browse the compact concept catalogue \
+(returns id, name, category by default). Use `search` to filter by name if you already \
+know what you're looking for. Only pass `include_definitions=true` if you need the full \
+definition text. Match what you see in the user's code to concept IDs. \
 Then narrate in 1-2 sentences: which concepts matched and why they fit.
 
-3. **TRAVERSE GRAPH** — Call `get_subgraph` with matched concept IDs. The graph is \
-your query planner. Use relationship types to reason about fit:
-   - `uses` / `component_of` — what the pattern includes
-   - `extends` / `specializes` — more specific variants
-   - `alternative_to` — competing approaches to compare
-   - `requires` / `precedes` / `enables` — prerequisites and sequencing
-   - `conflicts_with` — incompatibilities to flag
-   - `complements` — patterns that work well together
-   Then narrate in 1-2 sentences: the single most significant finding — a missing \
+3. **TRAVERSE GRAPH (scatter-gather)** — For each matched seed concept, spawn a \
+parallel subagent (via the Agent tool) to explore its neighbourhood independently. \
+Each subagent should use this prompt template:
+
+   ```
+   You are a graph analysis subagent. Given this architectural context:
+   {architectural_summary}
+   Explore concept "{concept_name}" (ID: {concept_id}).
+   Call get_subgraph(concept_ids=["{concept_id}"], max_hops=1, include_descriptions=true).
+   Analyze relationships using these types:
+   - uses / component_of — what the pattern includes
+   - extends / specializes — more specific variants
+   - alternative_to — competing approaches to compare
+   - requires / precedes / enables — prerequisites and sequencing
+   - conflicts_with — incompatibilities to flag
+   - complements — patterns that work well together
+   Return a JSON object with: concept, key_relationships, recommendation, discovered_ids.
+   Keep response under 300 tokens.
+   ```
+
+   Collect the subagent summaries and merge discovered concept IDs. \
+Then narrate in 1-2 sentences: the single most significant finding — a missing \
 prerequisite, a conflict, or an alternative worth considering.
+
+   **Fallback:** If subagents are not available, call `get_subgraph` directly with \
+compact defaults (omit optional parameters for the smallest useful response).
 
 4. **RETRIEVE PASSAGES** — Call `ask_book` scoped to concept IDs discovered in \
 step 3. This retrieves actual book text with chapter/page citations. \
@@ -71,6 +88,7 @@ with 4+ rows or 3+ columns, use `/generate-web-diagram` to render as a styled HT
 - Always show how recommendations map onto the user's actual codebase.
 - When multiple alternatives exist, present a comparison table before recommending.
 - Cite the book: include chapter number, page number, and a brief quote when relevant.
+- Prefer compact tool calls: omit optional parameters to get the smallest useful response.
 """
 
 server = Server("iconsult-mcp", instructions=INSTRUCTIONS)
@@ -97,14 +115,23 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="list_concepts",
             description=(
-                "ENTRY POINT — List all 138 concepts in the knowledge graph, grouped by "
-                "category. Returns concept IDs, names, and definitions. Call this after "
-                "reading the user's codebase to map their existing patterns and components "
-                "to concept IDs. These IDs are required input for get_subgraph and ask_book."
+                "ENTRY POINT — List all 138 concepts in the knowledge graph. Returns compact "
+                "output (id, name, category) by default. Use search to filter by name, and "
+                "include_definitions for full definition text. Call this after reading the "
+                "user's codebase to map their patterns to concept IDs for get_subgraph and ask_book."
             ),
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "search": {
+                        "type": "string",
+                        "description": "Filter concepts by name substring (case-insensitive)",
+                    },
+                    "include_definitions": {
+                        "type": "boolean",
+                        "description": "Include definition text in output (default: false)",
+                    },
+                },
                 "required": [],
             },
         ),
@@ -132,7 +159,15 @@ async def list_tools() -> list[Tool]:
                     },
                     "confidence_threshold": {
                         "type": "number",
-                        "description": "Minimum edge confidence to traverse (0.0-1.0, default: 0.0)",
+                        "description": "Minimum edge confidence to traverse (0.0-1.0, default: 0.5)",
+                    },
+                    "max_edges": {
+                        "type": "integer",
+                        "description": "Maximum edges to return (1-200, default: 50)",
+                    },
+                    "include_descriptions": {
+                        "type": "boolean",
+                        "description": "Include edge description text (default: false)",
                     },
                 },
                 "required": ["concept_ids"],
@@ -176,19 +211,24 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
     if name == "health_check":
         result = await health_check()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
     if name == "list_concepts":
-        result = await list_concepts()
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        result = await list_concepts(
+            search=arguments.get("search"),
+            include_definitions=arguments.get("include_definitions", False),
+        )
+        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
     if name == "get_subgraph":
         result = await get_subgraph(
             concept_ids=arguments.get("concept_ids", []),
             max_hops=arguments.get("max_hops", 2),
-            confidence_threshold=arguments.get("confidence_threshold", 0.0),
+            confidence_threshold=arguments.get("confidence_threshold", 0.5),
+            max_edges=arguments.get("max_edges", 50),
+            include_descriptions=arguments.get("include_descriptions", False),
         )
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
     if name == "ask_book":
         result = await ask_book(
@@ -196,7 +236,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             concept_ids=arguments.get("concept_ids"),
             max_passages=arguments.get("max_passages", 3),
         )
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -251,14 +291,18 @@ Please follow this workflow:
 architecture, tech stack, and patterns in use. Then tell me in 1-2 sentences \
 what you found and what you see as the core problem.
 
-2. **Map to concepts** — Call `list_concepts` to browse the knowledge graph \
-catalogue. Identify which concepts match patterns I already use and which ones \
-might address my needs. Then tell me in 1-2 sentences which concepts matched.
+2. **Map to concepts** — Call `list_concepts` to browse the compact concept catalogue \
+(id, name, category). Use `search` to filter if needed. Identify which concepts match \
+patterns I already use and which might address my needs. Then tell me in 1-2 sentences \
+which concepts matched.
 
-3. **Traverse the graph** — Call `get_subgraph` with the matched concept IDs. \
-Use the relationship types (alternative_to, requires, conflicts_with, complements, \
-enables, extends) to discover related patterns and reason about fit. Then tell me \
-in 1-2 sentences the single most significant finding from the graph.
+3. **Traverse the graph (scatter-gather)** — For each matched seed concept, spawn a \
+parallel subagent (via the Agent tool) to explore its neighbourhood. Each subagent calls \
+`get_subgraph` with that single concept and `include_descriptions=true`, analyzes the \
+relationships, and returns a compact summary (~300 tokens) with key findings and \
+discovered concept IDs. Merge the summaries. If subagents are not available, call \
+`get_subgraph` directly with compact defaults. Then tell me in 1-2 sentences the single \
+most significant finding from the graph.
 
 4. **Retrieve book passages** — Call `ask_book` scoped to the discovered concept \
 IDs for authoritative guidance. Cite chapter and page numbers. Then tell me in \

@@ -370,75 +370,129 @@ def find_concept_by_name(name: str) -> dict | None:
     }
 
 
-def get_all_concepts() -> list[dict]:
-    """Return all concepts ordered by category, name."""
+def get_all_concepts(
+    include_definitions: bool = False,
+    search: str | None = None,
+) -> list[dict]:
+    """Return all concepts ordered by category, name.
+
+    Args:
+        include_definitions: Include definition text (default: False for compact output).
+        search: Filter concepts whose name contains this substring (case-insensitive).
+    """
     conn = get_connection()
-    rows = conn.execute("""
-        SELECT id, name, definition, category
-        FROM concepts
-        ORDER BY category, name
-    """).fetchall()
+
+    if include_definitions:
+        select = "id, name, definition, category"
+    else:
+        select = "id, name, category"
+
+    if search:
+        rows = conn.execute(
+            f"SELECT {select} FROM concepts WHERE LOWER(name) LIKE LOWER(?) ORDER BY category, name",
+            [f"%{search}%"],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"SELECT {select} FROM concepts ORDER BY category, name"
+        ).fetchall()
+
+    if include_definitions:
+        return [
+            {"id": r[0], "name": r[1], "definition": r[2], "category": r[3]}
+            for r in rows
+        ]
     return [
-        {"id": r[0], "name": r[1], "definition": r[2], "category": r[3]}
+        {"id": r[0], "name": r[1], "category": r[2]}
         for r in rows
     ]
+
+
+def search_concepts(query: str, include_definitions: bool = False) -> list[dict]:
+    """Convenience wrapper: search concepts by name substring."""
+    return get_all_concepts(include_definitions=include_definitions, search=query)
 
 
 def get_subgraph(
     seed_concept_ids: list[str],
     max_hops: int = 2,
-    confidence_threshold: float = 0.0,
+    confidence_threshold: float = 0.5,
+    max_edges: int = 50,
+    include_descriptions: bool = False,
 ) -> dict:
-    """Multi-source BFS from seed concepts. Returns nodes and edges."""
-    from collections import deque
+    """Priority-queue traversal from seed concepts. Returns compact nodes and edges.
 
-    # Track nodes: concept_id -> {depth, is_seed, ...}
+    Explores highest-confidence edges first. Node discovery continues past the
+    edge cap so the nodes list is comprehensive; only edges are truncated.
+
+    Args:
+        seed_concept_ids: Concept IDs to start from.
+        max_hops: Maximum traversal depth (default 2).
+        confidence_threshold: Minimum edge confidence (default 0.5).
+        max_edges: Maximum edges to return (default 50). Edges beyond this
+            are still traversed for node discovery but not included in output.
+        include_descriptions: Include edge description text (default False).
+    """
+    import heapq
+
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
     seen_edges: set[int] = set()
+    total_edges_found = 0
 
     conn = get_connection()
 
     # Initialize seeds
     for cid in seed_concept_ids:
         row = conn.execute(
-            "SELECT id, name, definition, category FROM concepts WHERE id = ?",
+            "SELECT id, name, category FROM concepts WHERE id = ?",
             [cid],
         ).fetchone()
         if row:
             nodes[row[0]] = {
                 "id": row[0],
                 "name": row[1],
-                "definition": row[2],
-                "category": row[3],
+                "category": row[2],
                 "depth": 0,
                 "is_seed": True,
             }
 
-    queue = deque((cid, 0) for cid in nodes)
+    # Priority queue: (-confidence, concept_id, depth) — negate for max-heap
+    pq: list[tuple[float, str, int]] = []
+    for cid in nodes:
+        heapq.heappush(pq, (0.0, cid, 0))  # seeds at depth 0, priority 0
 
-    while queue:
-        current_id, depth = queue.popleft()
+    explored: set[str] = set()
+
+    while pq:
+        _neg_conf, current_id, depth = heapq.heappop(pq)
+        if current_id in explored:
+            continue
+        explored.add(current_id)
+
         if depth >= max_hops:
             continue
 
         rels = get_concept_relationships(current_id, confidence_threshold)
         for rel in rels:
-            # Record edge (deduplicate by relationship id)
-            if rel["id"] not in seen_edges:
-                seen_edges.add(rel["id"])
-                edges.append({
-                    "from_concept_id": rel["from_concept_id"],
-                    "from_name": rel["from_name"],
-                    "to_concept_id": rel["to_concept_id"],
-                    "to_name": rel["to_name"],
-                    "relationship_type": rel["relationship_type"],
-                    "confidence": rel["confidence"],
-                    "source_type": rel["source_type"],
-                    "description": rel["description"],
-                })
+            if rel["id"] in seen_edges:
+                continue
+            seen_edges.add(rel["id"])
+            total_edges_found += 1
 
-            # Discover neighbour
+            # Build compact edge; only add to output if under cap
+            if len(edges) < max_edges:
+                edge = {
+                    "from": rel["from_concept_id"],
+                    "to": rel["to_concept_id"],
+                    "type": rel["relationship_type"],
+                    "confidence": rel["confidence"],
+                }
+                if include_descriptions and rel.get("description"):
+                    edge["description"] = rel["description"]
+                edges.append(edge)
+
+            # Discover neighbour (always, even past edge cap)
             next_id = (
                 rel["to_concept_id"]
                 if rel["from_concept_id"] == current_id
@@ -446,23 +500,26 @@ def get_subgraph(
             )
             if next_id not in nodes:
                 row = conn.execute(
-                    "SELECT id, name, definition, category FROM concepts WHERE id = ?",
+                    "SELECT id, name, category FROM concepts WHERE id = ?",
                     [next_id],
                 ).fetchone()
                 if row:
                     nodes[next_id] = {
                         "id": row[0],
                         "name": row[1],
-                        "definition": row[2],
-                        "category": row[3],
+                        "category": row[2],
                         "depth": depth + 1,
                         "is_seed": False,
                     }
-                    queue.append((next_id, depth + 1))
+            if next_id not in explored:
+                edge_conf = rel["confidence"] if rel["confidence"] else 0.0
+                heapq.heappush(pq, (-edge_conf, next_id, depth + 1))
 
     return {
         "nodes": list(nodes.values()),
         "edges": edges,
+        "truncated": total_edges_found > max_edges,
+        "total_edges_found": total_edges_found,
     }
 
 

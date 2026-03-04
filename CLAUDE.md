@@ -29,8 +29,8 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 
 ## MCP Tools
 - `health_check` — server health + graph scope
-- `list_concepts` — ENTRY POINT: all 138 concepts grouped by category; call after reading user's code to map patterns to concept IDs
-- `get_subgraph(concept_ids, max_hops, confidence_threshold)` — QUERY PLANNER: BFS traversal; use relationship types to discover alternatives, prerequisites, conflicts
+- `list_concepts(search?, include_definitions?)` — ENTRY POINT: compact flat list (id, name, category) by default; `search` filters by name; `include_definitions=true` adds definition text
+- `get_subgraph(concept_ids, max_hops=2, confidence_threshold=0.5, max_edges=50, include_descriptions?)` — QUERY PLANNER: priority-queue traversal (highest confidence first); compact edges (from/to/type/confidence); `include_descriptions=true` adds edge descriptions; returns `truncated` flag when edges exceed `max_edges`
 - `ask_book(question, concept_ids?, max_passages?)` — DEEP CONTEXT: RAG search; always scope with concept_ids from get_subgraph
 
 ### Prompt
@@ -38,8 +38,8 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 
 ### Consulting workflow (server instructions)
 1. READ PROJECT — read user's codebase first
-2. MAP TO CONCEPTS — `list_concepts` to match patterns to concept IDs
-3. TRAVERSE GRAPH — `get_subgraph` to discover what's missing via relationship types
+2. MAP TO CONCEPTS — `list_concepts` (compact defaults) to match patterns to concept IDs; use `search` to filter
+3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `max_hops=1, include_descriptions=true`; merge summaries. Fallback: call `get_subgraph` directly with compact defaults
 4. RETRIEVE PASSAGES — `ask_book` scoped to discovered concept IDs
 5. SYNTHESIZE — before/after diagrams via `/generate-web-diagram` skill (HTML+Mermaid; ASCII only for <5 nodes), file-level changes, citations, prerequisite/conflict checks; comparison tables with 4+ rows rendered as HTML
 
@@ -63,3 +63,4 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - VSS extension may not load on MotherDuck; falls back to brute-force cosine similarity
 - Use `py -m iconsult_mcp.server --check` to test; `py` command for Python on this system
 - Scripts use `INSERT OR REPLACE` which DuckDB supports
+- When MCP tool output is persisted to disk (too large for inline), do NOT re-read/parse the file with Bash — the data is already in context from the tool call

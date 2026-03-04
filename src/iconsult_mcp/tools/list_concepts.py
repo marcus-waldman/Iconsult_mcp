@@ -1,25 +1,20 @@
-"""List all concepts in the knowledge graph, grouped by category."""
+"""List concepts in the knowledge graph (compact by default)."""
 
 from iconsult_mcp.db import get_all_concepts
 
 
-async def list_concepts() -> dict:
-    """Return all concepts grouped by category."""
-    concepts = get_all_concepts()
+async def list_concepts(
+    search: str | None = None,
+    include_definitions: bool = False,
+) -> dict:
+    """Return concepts as a flat list (compact by default).
 
-    by_category: dict[str, list[dict]] = {}
-    for c in concepts:
-        cat = c["category"] if c["category"] else "uncategorized"
-        by_category.setdefault(cat, []).append({
-            "id": c["id"],
-            "name": c["name"],
-            "definition": c["definition"],
-        })
-
-    return {
-        "total": len(concepts),
-        "categories": {
-            cat: {"count": len(items), "concepts": items}
-            for cat, items in sorted(by_category.items())
-        },
-    }
+    Args:
+        search: Filter by name substring (case-insensitive).
+        include_definitions: Include definition text (default: False).
+    """
+    concepts = get_all_concepts(
+        include_definitions=include_definitions,
+        search=search,
+    )
+    return {"total": len(concepts), "concepts": concepts}
