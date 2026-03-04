@@ -10,9 +10,30 @@ We pointed Iconsult at OpenAI's [Financial Research Agent](https://github.com/op
 
 **[View the full interactive architecture review →](https://marcus-waldman.github.io/Iconsult_mcp/docs/openai-financial-agent-review.html)**
 
+### The agent's current architecture
+
+The Financial Research Agent uses a **5-stage sequential pipeline** orchestrated by `FinancialResearchManager`. Search is the only concurrent stage — everything else runs in sequence, and the verifier is a terminal dead end:
+
+```mermaid
+flowchart TD
+    Q["User Query"] --> MGR["FinancialResearchManager"]
+    MGR --> PLAN["PlannerAgent (o3-mini)"]
+    PLAN -->|"FinancialSearchPlan"| FAN{"Fan-out N searches"}
+    FAN --> S1["SearchAgent"]
+    FAN --> S2["SearchAgent"]
+    FAN --> SN["SearchAgent"]
+    S1 --> W["WriterAgent (gpt-5.2)"]
+    S2 --> W
+    SN --> W
+    W -.-> FA["FundamentalsAgent (.as_tool)"]
+    W -.-> RA["RiskAgent (.as_tool)"]
+    W --> V["VerifierAgent"]
+    V --> OUT["Output"]
+```
+
 ### What Iconsult found
 
-The Financial Research Agent uses a sequential pipeline: **Planner → Search (fan-out) → Sub-analysts (as tools) → Writer → Verifier**. Solid foundation, but Iconsult's knowledge graph traversal uncovered 4 critical gaps:
+Solid foundation, but Iconsult's knowledge graph traversal uncovered 4 critical gaps:
 
 | # | Gap | Missing Pattern | Book Reference |
 |---|-----|----------------|----------------|
@@ -20,6 +41,29 @@ The Financial Research Agent uses a sequential pipeline: **Planner → Search (f
 | R2 | Raw search results pass unfiltered to writer | Hybrid Planner+Scorer | Ch. 12, pp. 387-390 |
 | R3 | All agents share same trust level — no capability boundaries | Supervision Tree with Guarded Capabilities | Ch. 5, pp. 142-145 |
 | R4 | Zero reliability patterns composed (book recommends 2-3 minimum) | Shared Epistemic Memory + Persistent Instruction Anchoring | Ch. 6, p. 203 |
+
+### Recommended architecture
+
+Adding a feedback loop, quality gate, shared memory, and retry logic:
+
+```mermaid
+flowchart TD
+    Q["User Query"] --> SUP["SupervisorManager"]
+    SUP --> MEM[("Shared Epistemic Memory")]
+    SUP --> PLAN["PlannerAgent"]
+    PLAN --> FAN{"Fan-out + Retry Logic"}
+    FAN --> S1["SearchAgent"]
+    FAN --> S2["SearchAgent"]
+    S1 & S2 --> SCR["ScorerAgent (quality gate)"]
+    SCR --> W["WriterAgent"]
+    W -.-> FA["FundamentalsAgent"]
+    W -.-> RA["RiskAgent"]
+    W --> V["VerifierAgent"]
+    V -->|"issues found"| W
+    V -->|"verified"| OUT["Output"]
+    MEM -.-> W
+    MEM -.-> V
+```
 
 ### How it got there
 
