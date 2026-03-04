@@ -4,6 +4,37 @@
 
 While other "AI consultants" are busy rephrasing your requirements back to you at $400/hour, Iconsult has ingested an entire textbook on multi-agent architecture, built a knowledge graph of 141 concepts and 462 relationships, and will give you evidence-backed pattern recommendations in under a second. No slide deck. No "circle back." No invoice.
 
+## See It In Action
+
+We pointed Iconsult at OpenAI's [Financial Research Agent](https://github.com/openai/openai-agents-python/tree/main/examples/financial_research_agent) — a 5-stage multi-agent pipeline from their Agents SDK — and asked it to find architectural gaps.
+
+**[View the full interactive architecture review →](https://marcus-waldman.github.io/Iconsult_mcp/docs/openai-financial-agent-review.html)**
+
+### What Iconsult found
+
+The Financial Research Agent uses a sequential pipeline: **Planner → Search (fan-out) → Sub-analysts (as tools) → Writer → Verifier**. Solid foundation, but Iconsult's knowledge graph traversal uncovered 4 critical gaps:
+
+| # | Gap | Missing Pattern | Book Reference |
+|---|-----|----------------|----------------|
+| R1 | Verifier flags issues but pipeline terminates — no self-correction | Auto-Healing Agent Resuscitation | Ch. 7, p. 216 |
+| R2 | Raw search results pass unfiltered to writer | Hybrid Planner+Scorer | Ch. 12, pp. 387-390 |
+| R3 | All agents share same trust level — no capability boundaries | Supervision Tree with Guarded Capabilities | Ch. 5, pp. 142-145 |
+| R4 | Zero reliability patterns composed (book recommends 2-3 minimum) | Shared Epistemic Memory + Persistent Instruction Anchoring | Ch. 6, p. 203 |
+
+### How it got there
+
+The consultation followed Iconsult's 5-step workflow:
+
+1. **Read the codebase** — Fetched all source files from `manager.py`, `agents/*.py`. Identified the orchestrator pattern in `FinancialResearchManager`, the `.as_tool()` composition, the silent `except Exception: return None` in search, and the terminal verifier.
+
+2. **Map to concepts** — `list_concepts` matched the codebase to: Orchestrator, Planner-Worker, Agent Delegates to Agent, Tool Use, and Supervisor patterns.
+
+3. **Traverse the graph** — `get_subgraph` explored each seed concept's neighborhood. The `requires` edges revealed that the Supervisor pattern *requires* Auto-Healing — which was entirely missing. The `complements` edges surfaced Hybrid Planner+Scorer as a natural addition.
+
+4. **Retrieve book passages** — `ask_book` scoped to the discovered concepts returned exact citations: chapter numbers, page ranges, and quotes grounding each recommendation.
+
+5. **Synthesize** — Generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/docs/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
+
 ## What It Does
 
 Iconsult is an MCP server that acts as a technical architecture advisor for multi-agent systems. It's backed by a knowledge graph extracted from *Agentic Architectural Patterns for Building Multi-Agent Systems* (Arsanjani & Bustos, Packt 2026) — meaning every recommendation comes with page numbers, not vibes.
@@ -102,97 +133,6 @@ Add to your Claude Desktop config (`claude_desktop_config.json`) or Claude Code 
 ```bash
 iconsult-mcp --check
 ```
-
-## Usage Example
-
-Here's what a typical consultation looks like. You describe your architecture problem, and Claude uses the knowledge graph to deliver grounded, project-specific advice.
-
----
-
-**You:**
-
-> I'm building a customer support system where multiple AI agents handle tickets — one triages, one looks up knowledge base articles, and one drafts responses. They're all independent right now and I'm having coordination problems. Can you help me improve the architecture?
-
-**Claude:**
-
-Let me start by reading your codebase to understand the current setup.
-
-*\[Reads project files — finds `triage_agent.py`, `kb_agent.py`, `response_agent.py`, `main.py` with a simple round-robin dispatcher\]*
-
-I can see you have three independent agents dispatched via round-robin in `main.py:42`. There's no shared state or coordination — each agent fires and forgets. Let me map this to the knowledge graph.
-
-*\[Calls `list_concepts` — scans the 138 concepts, identifies matches\]*
-
-Your setup maps to several concepts:
-- `c_047` Multi-Agent Orchestration
-- `c_031` Task Routing Pattern
-- `c_089` Agent Specialization
-
-Let me explore what the graph says about improving coordination.
-
-*\[Calls `get_subgraph(concept_ids=["c_047", "c_031", "c_089"], max_hops=2)`\]*
-
-Interesting findings from the graph:
-- `c_047` → **requires** → `c_052` (Shared Memory / Blackboard)
-- `c_047` → **alternative_to** → `c_061` (Hierarchical Delegation)
-- `c_031` → **extends** → `c_033` (Semantic Router)
-- `c_089` → **complements** → `c_055` (Agent Communication Protocol)
-- `c_061` → **conflicts_with** → `c_072` (Fully Decentralized Swarm)
-
-Your round-robin dispatcher is a basic Task Router (`c_031`), but you're missing the Shared Memory (`c_052`) that Multi-Agent Orchestration *requires*. Let me get the book's guidance.
-
-*\[Calls `ask_book(question="How should agents share state in an orchestrated multi-agent system?", concept_ids=["c_047", "c_052", "c_055"])`\]*
-
-Based on the book (Chapter 7, pp. 184–189):
-
-> "An orchestrated multi-agent system without shared state degenerates into parallel independent execution — agents cannot build on each other's work."
-
-Here's my recommendation:
-
-*\[Calls `/generate-web-diagram` — generates a self-contained HTML file with Mermaid diagrams and opens it in the browser\]*
-
-**Before:**
-
-```mermaid
-graph LR
-    TQ[Ticket Queue] --> RR[Round-Robin Dispatcher]
-    RR --> TA[Triage Agent]
-    RR --> KB[KB Agent]
-    RR --> RA[Response Agent]
-
-    style TA fill:#fca5a5,stroke:#ef4444
-    style KB fill:#fca5a5,stroke:#ef4444
-    style RA fill:#fca5a5,stroke:#ef4444
-```
-
-**After:**
-
-```mermaid
-graph LR
-    TQ[Ticket Queue] --> SR[Semantic Router]
-    SR --> BB[(Blackboard)]
-    BB <--> TA[Triage Agent]
-    BB <--> KB[KB Agent]
-    BB <--> RA[Response Agent]
-
-    style BB fill:#93c5fd,stroke:#3b82f6
-    style SR fill:#86efac,stroke:#22c55e
-```
-
-**Specific changes:**
-1. **`main.py:42`** — Replace round-robin with a Semantic Router (`c_033`) that routes by ticket intent, not rotation
-2. **New `blackboard.py`** — Add a shared state store so Triage writes classification, KB reads it to scope search, and Response reads both to draft with context
-3. **`response_agent.py:15`** — Read triage classification + KB articles from blackboard before drafting
-
-**Prerequisites met:** Your agents are already specialized (`c_089`) ✓
-**Conflict check:** No conflicts — blackboard is compatible with all your current patterns ✓
-**Alternative considered:** Hierarchical Delegation (`c_061`) would also work but adds a supervisor agent you don't need yet at this scale.
-
-Want me to dive deeper into any of these changes?
-
----
-
-Every recommendation traces back to the book. Every pattern gets checked for prerequisites and conflicts. No hallucinated best practices — just the graph.
 
 ## License
 

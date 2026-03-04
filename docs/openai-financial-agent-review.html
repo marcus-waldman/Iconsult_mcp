@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenAI Financial Research Agent — Architecture Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ THEME — Blueprint dark-first ============ */
+  :root {
+    --font-body: 'Sora', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+
+    --bg: #0b1120;
+    --surface: #111827;
+    --surface2: #1a2332;
+    --surface-elevated: #1e293b;
+    --border: rgba(148, 163, 184, 0.10);
+    --border-bright: rgba(148, 163, 184, 0.20);
+    --text: #e2e8f0;
+    --text-dim: #64748b;
+
+    --current: #ef4444;
+    --current-dim: rgba(239, 68, 68, 0.10);
+    --improved: #10b981;
+    --improved-dim: rgba(16, 185, 129, 0.10);
+    --warn: #f59e0b;
+    --warn-dim: rgba(245, 158, 11, 0.10);
+    --info: #0ea5e9;
+    --info-dim: rgba(14, 165, 233, 0.10);
+    --slate: #475569;
+    --slate-dim: rgba(71, 85, 105, 0.12);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f0f4f8;
+      --surface: #ffffff;
+      --surface2: #f1f5f9;
+      --surface-elevated: #ffffff;
+      --border: rgba(0, 0, 0, 0.08);
+      --border-bright: rgba(0, 0, 0, 0.15);
+      --text: #0f172a;
+      --text-dim: #64748b;
+
+      --current: #dc2626;
+      --current-dim: rgba(220, 38, 38, 0.08);
+      --improved: #059669;
+      --improved-dim: rgba(5, 150, 105, 0.08);
+      --warn: #d97706;
+      --warn-dim: rgba(217, 119, 6, 0.08);
+      --info: #0284c7;
+      --info-dim: rgba(2, 132, 199, 0.08);
+      --slate: #94a3b8;
+      --slate-dim: rgba(148, 163, 184, 0.12);
+    }
+  }
+
+  /* ============ RESET ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse at 15% 5%, rgba(14, 165, 233, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 85% 95%, rgba(16, 185, 129, 0.04) 0%, transparent 40%);
+    color: var(--text);
+    font-family: var(--font-body);
+    padding: 48px 32px;
+    min-height: 100vh;
+    /* Subtle grid pattern */
+    background-size: 100% 100%, 100% 100%, 40px 40px;
+    background-blend-mode: normal;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 60px 60px;
+    opacity: 0.3;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ============ ANIMATION ============ */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .anim { animation: fadeUp 0.45s ease-out both; animation-delay: calc(var(--i, 0) * 0.07s); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* ============ LAYOUT ============ */
+  .page { max-width: 1400px; margin: 0 auto; position: relative; z-index: 1; }
+
+  /* ============ HEADER ============ */
+  header { margin-bottom: 48px; }
+
+  h1 {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -1.2px;
+    line-height: 1.15;
+    margin-bottom: 8px;
+    text-wrap: balance;
+  }
+
+  .subtitle {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  .lead {
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    max-width: 800px;
+    margin-bottom: 0;
+  }
+
+  .lead strong { color: var(--text); }
+
+  /* ============ TWO-COLUMN COMPARISON ============ */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    margin-bottom: 48px;
+  }
+
+  .col { min-width: 0; }
+
+  .col-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border);
+  }
+
+  .col-header .badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 4px 12px;
+    border-radius: 4px;
+  }
+
+  .badge--current { background: var(--current-dim); color: var(--current); border: 1px solid var(--current); }
+  .badge--improved { background: var(--improved-dim); color: var(--improved); border: 1px solid var(--improved); }
+
+  .col-header h2 {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+  }
+
+  /* ============ MERMAID ============ */
+  .mermaid-wrap {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .mermaid-wrap .zoom-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 4px;
+    z-index: 10;
+  }
+
+  .mermaid-wrap .zoom-controls button {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .mermaid-wrap .zoom-controls button:hover {
+    background: var(--surface-elevated);
+    color: var(--text);
+  }
+
+  .mermaid-inner {
+    display: flex;
+    justify-content: center;
+    overflow: auto;
+    cursor: grab;
+    min-height: 280px;
+  }
+
+  .mermaid-inner:active { cursor: grabbing; }
+
+  .mermaid-inner svg { max-width: none; }
+
+  .mermaid .nodeLabel { color: var(--text) !important; }
+  .mermaid .edgeLabel { color: var(--text-dim) !important; background-color: var(--surface) !important; }
+  .mermaid .edgeLabel rect { fill: var(--surface) !important; }
+  .mermaid .node rect,
+  .mermaid .node circle,
+  .mermaid .node polygon { stroke-width: 1.5px; }
+  .mermaid .edge-pattern-solid { stroke-width: 1.5px; }
+  .mermaid .edgeLabel { font-family: var(--font-mono) !important; font-size: 12px !important; }
+  .mermaid .nodeLabel { font-family: var(--font-body) !important; font-size: 14px !important; }
+
+  /* ============ ISSUE / IMPROVEMENT CARDS ============ */
+  .findings { display: flex; flex-direction: column; gap: 10px; }
+
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    transition: border-color 0.2s;
+  }
+
+  .finding:hover { border-color: var(--border-bright); }
+
+  .finding--issue { border-left: 3px solid var(--current); }
+  .finding--fix { border-left: 3px solid var(--improved); }
+
+  .finding-icon {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    margin-top: 1px;
+  }
+
+  .finding--issue .finding-icon { background: var(--current-dim); color: var(--current); }
+  .finding--fix .finding-icon { background: var(--improved-dim); color: var(--improved); }
+
+  .finding-text { min-width: 0; }
+
+  .finding-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 3px;
+  }
+
+  .finding-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .finding-desc code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--slate-dim);
+    color: var(--info);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .finding-file {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    opacity: 0.7;
+  }
+
+  /* ============ RECOMMENDATIONS SECTION ============ */
+  .recs {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    margin-bottom: 48px;
+  }
+
+  .rec {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+  }
+
+  .rec-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .rec-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .rec-num--1 { background: var(--current-dim); color: var(--current); }
+  .rec-num--2 { background: var(--warn-dim); color: var(--warn); }
+  .rec-num--3 { background: var(--info-dim); color: var(--info); }
+  .rec-num--4 { background: var(--improved-dim); color: var(--improved); }
+
+  .rec h3 {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+
+  .rec p {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  .rec p strong { color: var(--text); }
+
+  .rec-cite {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--info);
+    background: var(--info-dim);
+    padding: 6px 12px;
+    border-radius: 6px;
+    display: inline-block;
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+
+  .rec-code {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-top: 12px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    overflow-x: auto;
+  }
+
+  .rec-code strong { color: var(--improved); font-weight: 600; }
+
+  /* ============ FOOTER ============ */
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: 24px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  footer strong { color: var(--text); }
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-width: 900px) {
+    body { padding: 20px 16px; }
+    .comparison { grid-template-columns: 1fr; }
+    h1 { font-size: 28px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- HEADER -->
+  <header class="anim" style="--i:0">
+    <div class="subtitle">iconsult architecture review</div>
+    <h1>OpenAI Financial Research Agent</h1>
+    <p class="lead">
+      Analysis of the <strong>5-stage sequential pipeline</strong> from <code style="font-family:var(--font-mono);font-size:13px;background:var(--slate-dim);color:var(--info);padding:2px 6px;border-radius:3px;">openai-agents-python/examples/financial_research_agent</code>.
+      Mapped against architectural patterns from <strong>Agentic Architectural Patterns for Building Multi-Agent Systems</strong> (Arsanjani &amp; Bustos, 2026).
+    </p>
+  </header>
+
+  <!-- COMPARISON GRID -->
+  <div class="comparison">
+
+    <!-- LEFT: CURRENT ARCHITECTURE -->
+    <div class="col anim" style="--i:1">
+      <div class="col-header">
+        <span class="badge badge--current">Current</span>
+        <h2>Sequential Pipeline</h2>
+      </div>
+
+      <div class="mermaid-wrap">
+        <div class="zoom-controls">
+          <button onclick="zoom(this, 1.2)" title="Zoom in">+</button>
+          <button onclick="zoom(this, 0.83)" title="Zoom out">&minus;</button>
+          <button onclick="resetZoom(this)" title="Reset">R</button>
+        </div>
+        <div class="mermaid-inner">
+          <pre class="mermaid">
+flowchart TD
+    Q["User Query"] --> MGR["FinancialResearchManager"]
+    MGR --> PLAN["PlannerAgent\n(o3-mini)"]
+    PLAN --> |"FinancialSearchPlan"| FAN{"Fan-out\nN searches"}
+    FAN --> S1["SearchAgent"]
+    FAN --> S2["SearchAgent"]
+    FAN --> SN["SearchAgent"]
+    S1 --> W["WriterAgent\n(gpt-5.2)"]
+    S2 --> W
+    SN --> W
+    W -.-> FA["FundamentalsAgent\n(.as_tool)"]
+    W -.-> RA["RiskAgent\n(.as_tool)"]
+    W --> V["VerifierAgent"]
+    V --> OUT["Output"]
+
+    classDef mgr fill:#0ea5e933,stroke:#0ea5e9,stroke-width:2px
+    classDef agent fill:#47556922,stroke:#475569,stroke-width:1.5px
+    classDef warn fill:#ef444422,stroke:#ef4444,stroke-width:2px
+    classDef tool fill:#f59e0b22,stroke:#f59e0b,stroke-width:1.5px
+
+    class MGR mgr
+    class PLAN,S1,S2,SN,W agent
+    class V warn
+    class FA,RA tool
+    class FAN agent
+    class Q,OUT agent
+          </pre>
+        </div>
+      </div>
+
+      <div class="findings">
+        <div class="finding finding--issue anim" style="--i:3">
+          <div class="finding-icon">!</div>
+          <div class="finding-text">
+            <div class="finding-title">No Error Recovery</div>
+            <div class="finding-desc">Search failures silently return <code>None</code> — no retry, no fallback queries, no degraded output warning.</div>
+            <div class="finding-file">manager.py:_search() → except Exception: return None</div>
+          </div>
+        </div>
+        <div class="finding finding--issue anim" style="--i:4">
+          <div class="finding-icon">!</div>
+          <div class="finding-text">
+            <div class="finding-title">No Feedback Loop</div>
+            <div class="finding-desc">Verifier flags issues but the pipeline <strong>terminates</strong> — it never loops back to the writer for corrections. One-shot verification is a dead end.</div>
+            <div class="finding-file">manager.py:_verify_report() → returns result, no retry</div>
+          </div>
+        </div>
+        <div class="finding finding--issue anim" style="--i:5">
+          <div class="finding-icon">!</div>
+          <div class="finding-text">
+            <div class="finding-title">No Capability Isolation</div>
+            <div class="finding-desc">All agents share the same trust level. The writer can call any tool; no guarded capability boundaries between branches.</div>
+            <div class="finding-file">manager.py — flat orchestration, no per-agent tool scoping</div>
+          </div>
+        </div>
+        <div class="finding finding--issue anim" style="--i:6">
+          <div class="finding-icon">!</div>
+          <div class="finding-text">
+            <div class="finding-title">No Search Quality Gate</div>
+            <div class="finding-desc">Raw search results pass directly to the writer. No evaluation of search quality, relevance, or completeness before synthesis.</div>
+            <div class="finding-file">manager.py:_perform_searches() → results passed directly</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: RECOMMENDED ARCHITECTURE -->
+    <div class="col anim" style="--i:2">
+      <div class="col-header">
+        <span class="badge badge--improved">Recommended</span>
+        <h2>Supervised + Self-Healing</h2>
+      </div>
+
+      <div class="mermaid-wrap">
+        <div class="zoom-controls">
+          <button onclick="zoom(this, 1.2)" title="Zoom in">+</button>
+          <button onclick="zoom(this, 0.83)" title="Zoom out">&minus;</button>
+          <button onclick="resetZoom(this)" title="Reset">R</button>
+        </div>
+        <div class="mermaid-inner">
+          <pre class="mermaid">
+flowchart TD
+    Q["User Query"] --> SUP["SupervisorManager"]
+    SUP --> MEM[("Shared Epistemic\nMemory")]
+    SUP --> PLAN["PlannerAgent"]
+    PLAN --> FAN{"Fan-out +\nRetry Logic"}
+    FAN --> S1["SearchAgent"]
+    FAN --> S2["SearchAgent"]
+    S1 & S2 --> SCR["ScorerAgent\n(quality gate)"]
+    SCR --> W["WriterAgent"]
+    W -.-> FA["FundamentalsAgent"]
+    W -.-> RA["RiskAgent"]
+    W --> V["VerifierAgent"]
+    V -->|"issues found"| W
+    V -->|"verified"| OUT["Output"]
+    MEM -.-> W
+    MEM -.-> V
+
+    classDef sup fill:#10b98133,stroke:#10b981,stroke-width:2px
+    classDef agent fill:#47556922,stroke:#475569,stroke-width:1.5px
+    classDef new fill:#10b98122,stroke:#10b981,stroke-width:2px
+    classDef tool fill:#f59e0b22,stroke:#f59e0b,stroke-width:1.5px
+    classDef mem fill:#0ea5e922,stroke:#0ea5e9,stroke-width:2px
+
+    class SUP sup
+    class PLAN,S1,S2,W agent
+    class SCR,V new
+    class FA,RA tool
+    class MEM mem
+    class FAN agent
+    class Q,OUT agent
+          </pre>
+        </div>
+      </div>
+
+      <div class="findings">
+        <div class="finding finding--fix anim" style="--i:3">
+          <div class="finding-icon">+</div>
+          <div class="finding-text">
+            <div class="finding-title">Auto-Healing Feedback Loop</div>
+            <div class="finding-desc">When the Verifier finds issues, it <strong>loops back</strong> to the Writer (max 2 retries) with specific correction instructions. Self-correcting output.</div>
+          </div>
+        </div>
+        <div class="finding finding--fix anim" style="--i:4">
+          <div class="finding-icon">+</div>
+          <div class="finding-text">
+            <div class="finding-title">Supervision Tree with Guarded Capabilities</div>
+            <div class="finding-desc">Research branch gets only web tools. Analysis branch gets only financial context. Writer cannot access raw web search. <strong>Least privilege per subtree.</strong></div>
+          </div>
+        </div>
+        <div class="finding finding--fix anim" style="--i:5">
+          <div class="finding-icon">+</div>
+          <div class="finding-text">
+            <div class="finding-title">Scorer Agent (Quality Gate)</div>
+            <div class="finding-desc">New <strong>Hybrid Planner+Scorer</strong> stage evaluates search result quality, relevance, and coverage before passing to analysis. Filters noise early.</div>
+          </div>
+        </div>
+        <div class="finding finding--fix anim" style="--i:6">
+          <div class="finding-icon">+</div>
+          <div class="finding-text">
+            <div class="finding-title">Shared Epistemic Memory</div>
+            <div class="finding-desc">Central context store anchors the original query intent, preventing drift. All agents reference the <strong>same ground truth</strong> throughout the pipeline.</div>
+          </div>
+        </div>
+        <div class="finding finding--fix anim" style="--i:7">
+          <div class="finding-icon">+</div>
+          <div class="finding-text">
+            <div class="finding-title">Search Retry with Fallback</div>
+            <div class="finding-desc">Failed searches retry with rephrased queries instead of silently returning <code>None</code>. Exponential backoff + alternative search terms.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- DETAILED RECOMMENDATIONS -->
+  <h2 class="anim" style="--i:8;font-size:24px;font-weight:700;letter-spacing:-0.8px;margin-bottom:24px;">Recommendations</h2>
+
+  <div class="recs">
+
+    <div class="rec anim" style="--i:9">
+      <div class="rec-header">
+        <div class="rec-num rec-num--1">R1</div>
+        <h3>Add a Verification Feedback Loop (Auto-Healing)</h3>
+      </div>
+      <p>
+        The current <code style="font-family:var(--font-mono);font-size:12px;background:var(--slate-dim);color:var(--info);padding:1px 5px;border-radius:3px;">_verify_report()</code> returns a <code style="font-family:var(--font-mono);font-size:12px;background:var(--slate-dim);color:var(--info);padding:1px 5px;border-radius:3px;">VerificationResult</code> but the pipeline ends there. When <strong>verified=False</strong>, the report should loop back to the writer with the verifier's issues, up to 2 retries. This implements the <strong>Auto-Healing Agent Resuscitation</strong> pattern — the supervisor detects failure and coordinates recovery.
+      </p>
+      <div class="rec-code"><strong>// manager.py — replace _verify_report call</strong>
+for attempt in range(3):
+    verification = await self._verify_report(report)
+    if verification.verified:
+        break
+    # Feed issues back to writer for correction
+    report = await self._write_report(
+        query, search_results,
+        corrections=verification.issues
+    )</div>
+      <div class="rec-cite">Ch. 7, p. 216 — "The Auto-Healing Agent Resuscitation pattern provides a mechanism for high availability, using an external supervisor to monitor and automatically restart crashed agent processes."</div>
+    </div>
+
+    <div class="rec anim" style="--i:10">
+      <div class="rec-header">
+        <div class="rec-num rec-num--2">R2</div>
+        <h3>Add a Scorer Agent (Hybrid Planner+Scorer)</h3>
+      </div>
+      <p>
+        Search results currently flow unfiltered to the writer. Add a <strong>ScorerAgent</strong> between search and writing that evaluates each result for relevance, recency, and factual density. This is the <strong>Hybrid Planner+Scorer</strong> pattern — a generator-evaluator pairing where the planner creates work and the scorer vets quality before downstream consumption.
+      </p>
+      <div class="rec-code"><strong>// New: agents/scorer_agent.py</strong>
+class SearchQualityScore(BaseModel):
+    relevant_results: list[str]  # filtered, high-quality results
+    coverage_gaps: list[str]     # missing topics to re-search
+    confidence: float            # 0-1 overall quality score
+
+scorer_agent = Agent(
+    name="SearchScorerAgent",
+    instructions=SCORER_PROMPT,
+    output_type=SearchQualityScore,
+)</div>
+      <div class="rec-cite">Ch. 12, pp. 387-390 — "Hybrid Workflow Agent Architecture (Planner + Scorer): The system uses a generator-evaluator pairing to create and vet its own workflows."</div>
+    </div>
+
+    <div class="rec anim" style="--i:11">
+      <div class="rec-header">
+        <div class="rec-num rec-num--3">R3</div>
+        <h3>Implement Supervision Tree with Guarded Capabilities</h3>
+      </div>
+      <p>
+        Currently all agents are peers under a flat orchestrator. The <strong>Supervision Tree</strong> pattern organizes agents hierarchically with <strong>capability boundaries per subtree</strong>. The Research branch (planner + search) should only access <code style="font-family:var(--font-mono);font-size:12px;background:var(--slate-dim);color:var(--info);padding:1px 5px;border-radius:3px;">WebSearchTool</code>. The Analysis branch should only see financial data. This prevents a compromised agent from accessing capabilities outside its role.
+      </p>
+      <div class="rec-code"><strong>// manager.py — guarded capability spawning</strong>
+research_supervisor = SupervisorAgent(strategy="ONE_FOR_ONE")
+research_supervisor.spawn_child(
+    PlannerAgent, tools=[]           # planner needs no tools
+)
+research_supervisor.spawn_child(
+    SearchAgent, tools=[WebSearchTool()]  # only web access
+)
+
+analysis_supervisor = SupervisorAgent(strategy="ESCALATE")
+analysis_supervisor.spawn_child(
+    FundamentalsAgent, tools=[]  # analysis context only
+)
+analysis_supervisor.spawn_child(
+    RiskAgent, tools=[]          # analysis context only
+)</div>
+      <div class="rec-cite">Ch. 5, pp. 142-145 — "Capabilities are granted per subtree, ensuring that a 'Research' branch cannot access 'Billing' tools... coupled with a defined recovery strategy such as 'ONE_FOR_ONE,' allows the system to remain resilient and self-healing."</div>
+    </div>
+
+    <div class="rec anim" style="--i:12">
+      <div class="rec-header">
+        <div class="rec-num rec-num--4">R4</div>
+        <h3>Compose Reliability Patterns (Defense in Depth)</h3>
+      </div>
+      <p>
+        The book recommends <strong>at least 2-3 reliability patterns</strong> for production systems. Currently the agent has zero. Compose: (1) <strong>Shared Epistemic Memory</strong> to anchor the original query intent across all agents, (2) <strong>Persistent Instruction Anchoring</strong> to prevent prompt drift in long reports, and (3) the <strong>Instruction Fidelity Auditing</strong> already partially implemented by the verifier.
+      </p>
+      <div class="rec-cite">Ch. 6, p. 203 — "For production-grade reliability, designing systems with at least two or three of these patterns instantiated concurrently is a recommended best practice."</div>
+    </div>
+
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="anim" style="--i:13">
+    <strong>Source:</strong> Arsanjani &amp; Bustos, <em>Agentic Architectural Patterns for Building Multi-Agent Systems</em>, Packt 2026<br>
+    <strong>Patterns matched:</strong> Orchestrator, Planner-Worker, Agent Delegates to Agent, Tool Use, Supervisor<br>
+    <strong>Missing prerequisites:</strong> Auto-Healing (Ch. 7), Supervision Tree (Ch. 5), Shared Epistemic Memory (Ch. 6)<br>
+    <strong>No conflicts detected</strong> — all recommended patterns are complementary
+  </footer>
+
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    flowchart: { curve: 'basis', padding: 16 },
+    themeVariables: {
+      primaryColor: isDark ? '#1e293b' : '#e2e8f0',
+      primaryBorderColor: isDark ? '#475569' : '#94a3b8',
+      primaryTextColor: isDark ? '#e2e8f0' : '#0f172a',
+      secondaryColor: isDark ? '#1a2332' : '#f1f5f9',
+      secondaryBorderColor: isDark ? '#475569' : '#94a3b8',
+      secondaryTextColor: isDark ? '#e2e8f0' : '#0f172a',
+      tertiaryColor: isDark ? '#27201a' : '#fef3c7',
+      tertiaryBorderColor: isDark ? '#d97706' : '#f59e0b',
+      tertiaryTextColor: isDark ? '#fef3c7' : '#27201a',
+      lineColor: isDark ? '#475569' : '#94a3b8',
+      fontSize: '14px',
+      fontFamily: "'Sora', system-ui, sans-serif",
+      noteBkgColor: isDark ? '#1e293b' : '#fefce8',
+      noteTextColor: isDark ? '#e2e8f0' : '#0f172a',
+      noteBorderColor: isDark ? '#f59e0b' : '#d97706',
+    }
+  });
+</script>
+
+<script>
+  // Zoom controls for Mermaid diagrams
+  const INITIAL_ZOOM = 1;
+  const zoomState = new WeakMap();
+
+  function getState(btn) {
+    const wrap = btn.closest('.mermaid-wrap');
+    if (!zoomState.has(wrap)) zoomState.set(wrap, { scale: INITIAL_ZOOM, translateX: 0, translateY: 0 });
+    return { wrap, state: zoomState.get(wrap) };
+  }
+
+  function applyTransform(wrap, state) {
+    const svg = wrap.querySelector('.mermaid-inner svg');
+    if (svg) svg.style.transform = `scale(${state.scale}) translate(${state.translateX}px, ${state.translateY}px)`;
+  }
+
+  window.zoom = function(btn, factor) {
+    const { wrap, state } = getState(btn);
+    state.scale = Math.max(0.3, Math.min(4, state.scale * factor));
+    applyTransform(wrap, state);
+  };
+
+  window.resetZoom = function(btn) {
+    const { wrap, state } = getState(btn);
+    state.scale = INITIAL_ZOOM;
+    state.translateX = 0;
+    state.translateY = 0;
+    applyTransform(wrap, state);
+  };
+
+  // Ctrl/Cmd + scroll zoom
+  document.querySelectorAll('.mermaid-wrap').forEach(wrap => {
+    wrap.addEventListener('wheel', e => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      if (!zoomState.has(wrap)) zoomState.set(wrap, { scale: INITIAL_ZOOM, translateX: 0, translateY: 0 });
+      const state = zoomState.get(wrap);
+      const factor = e.deltaY < 0 ? 1.1 : 0.9;
+      state.scale = Math.max(0.3, Math.min(4, state.scale * factor));
+      applyTransform(wrap, state);
+    }, { passive: false });
+
+    // Drag to pan
+    let dragging = false, startX, startY;
+    const inner = wrap.querySelector('.mermaid-inner');
+    inner.addEventListener('mousedown', e => {
+      if (!zoomState.has(wrap)) return;
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      inner.style.cursor = 'grabbing';
+    });
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const state = zoomState.get(wrap);
+      if (!state) return;
+      state.translateX += (e.clientX - startX) / state.scale;
+      state.translateY += (e.clientY - startY) / state.scale;
+      startX = e.clientX;
+      startY = e.clientY;
+      applyTransform(wrap, state);
+    });
+    window.addEventListener('mouseup', () => {
+      if (dragging) { dragging = false; inner.style.cursor = 'grab'; }
+    });
+  });
+</script>
+
+</body>
+</html>
