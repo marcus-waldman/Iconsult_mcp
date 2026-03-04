@@ -64,9 +64,11 @@ This gives Claude Code the `/generate-web-diagram` command used during consultat
 pip install git+https://github.com/marcus-waldman/Iconsult_mcp.git
 ```
 
-For development (after cloning):
+For development:
 
 ```bash
+git clone https://github.com/marcus-waldman/Iconsult_mcp.git
+cd Iconsult_mcp
 pip install -e .
 ```
 
