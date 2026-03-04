@@ -8,7 +8,9 @@ While other "AI consultants" are busy rephrasing your requirements back to you a
 
 We pointed Iconsult at OpenAI's [Financial Research Agent](https://github.com/openai/openai-agents-python/tree/main/examples/financial_research_agent) — a 5-stage multi-agent pipeline from their Agents SDK — and asked it to find architectural gaps.
 
-**[View the full interactive architecture review →](https://marcus-waldman.github.io/Iconsult_mcp/docs/openai-financial-agent-review.html)**
+[![Watch the demo](https://img.youtube.com/vi/GWzlYf5MsHM/maxresdefault.jpg)](https://www.youtube.com/watch?v=GWzlYf5MsHM)
+
+**[View the full interactive architecture review →](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html)**
 
 ### The agent's current architecture
 
@@ -77,7 +79,7 @@ The consultation followed Iconsult's 5-step workflow:
 
 4. **Retrieve book passages** — `ask_book` scoped to the discovered concepts returned exact citations: chapter numbers, page ranges, and quotes grounding each recommendation.
 
-5. **Synthesize** — Generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/docs/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
+5. **Synthesize** — Generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
 
 ## What It Does
 
