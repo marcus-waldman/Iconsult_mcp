@@ -620,6 +620,22 @@ def get_consultations_by_fingerprint(fingerprint: str) -> list[dict]:
     ]
 
 
+def get_pattern_assessments(consultation_id: str) -> list[dict]:
+    """Extract pattern_assessment steps from a consultation's step log."""
+    import json as _json
+
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT steps FROM consultations WHERE id = ?",
+        [consultation_id],
+    ).fetchone()
+    if not row:
+        return []
+
+    steps = _json.loads(row[0]) if row[0] else []
+    return [s for s in steps if s.get("type") == "pattern_assessment"]
+
+
 def search_sections_by_embedding(
     query_embedding: list[float],
     max_results: int = 5,

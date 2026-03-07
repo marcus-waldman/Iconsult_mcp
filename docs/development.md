@@ -98,6 +98,7 @@ py scripts/run_pipeline.py --reset      # Clear everything and start over
 | `get_subgraph` | Query planner | Priority-queue BFS from seed concepts; pass `consultation_id` to log traversal steps (seeds, discovered concepts, relationship types) |
 | `ask_book` | Deep context | RAG search over book sections; returns `suggested_questions` derived deterministically from graph edge templates; pass `consultation_id` to log retrieval steps |
 | `consultation_report` | Coverage check | Computes concept coverage %, relationship type coverage, passage diversity, prerequisite/conflict checks, gap list; optionally diffs two sessions with same fingerprint |
+| `score_architecture` | **Maturity scorecard** | Deterministic scoring from stored `pattern_assessment` steps; computes maturity level (L1-L6), 5 dimension radar scores (Robustness, Coordination, Compliance, User Interaction, Agent Capabilities), gap analysis with severity, recommended metrics from Ch. 7/8/9, implementation roadmap; same consultation always produces same scores |
 
 ### Reproducible Consultations
 
@@ -108,15 +109,16 @@ The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report`
 3. **Coverage gaps** — `consultation_report` computes what percentage of matched concepts were explored, which relationship types were seen, and flags missing prerequisites/conflicts.
 4. **Cross-session comparison** — `consultation_report(id, compare_to=other_id)` diffs two sessions with the same fingerprint to show concept overlap, coverage deltas, and relationship type differences.
 5. **Canonical questions** — `ask_book` returns `suggested_questions` generated from graph edge templates (e.g., "What are the prerequisites for X and how does Y fulfill them?"), reducing question formulation variance.
+6. **Deterministic scoring** — `score_architecture` reads stored `pattern_assessment` steps and computes maturity level, dimension scores, and gap analysis using fixed formulas. No LLM involved in scoring — same assessments always produce same numbers.
 
 ### Consulting Workflow (6 steps)
 
 1. **READ PROJECT** — Read the user's codebase
 2. **MATCH CONCEPTS** — `match_concepts` with project description → concept ranking + `consultation_id`
-3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents
+3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents; log `pattern_assessment` steps for each pattern found/missing in user's code
 4. **RETRIEVE PASSAGES** — `ask_book` scoped to discovered concepts with `consultation_id`; follow `suggested_questions`
-5. **CHECK COVERAGE** — `consultation_report` to verify gaps before synthesis
-6. **SYNTHESIZE** — Diagrams, file-level changes, citations, prerequisite/conflict checks
+5. **CHECK COVERAGE + SCORE** — `consultation_report` to verify gaps; `score_architecture` for deterministic maturity scorecard
+6. **SYNTHESIZE** — Diagrams, file-level changes, citations, prerequisite/conflict checks, scorecard visualization
 
 ## Technical Notes
 

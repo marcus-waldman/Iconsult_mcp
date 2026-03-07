@@ -21,6 +21,7 @@ from iconsult_mcp.tools.get_subgraph import get_subgraph
 from iconsult_mcp.tools.ask_book import ask_book
 from iconsult_mcp.tools.match_concepts import match_concepts
 from iconsult_mcp.tools.consultation_report import consultation_report
+from iconsult_mcp.tools.score_architecture import score_architecture
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -63,8 +64,23 @@ Each subagent should use this prompt template:
    ```
 
    Pass `consultation_id` from step 2 to `get_subgraph` so traversal steps are logged. \
-Collect the subagent summaries and merge discovered concept IDs. \
-Then narrate in 1-2 sentences: the single most significant finding — a missing \
+Collect the subagent summaries and merge discovered concept IDs.
+
+   **IMPORTANT — Log pattern assessments:** During traversal, for each architectural \
+pattern you identify in the user's codebase (or confirm is missing), log an assessment:
+   ```
+   log_consultation_step(consultation_id, "pattern_assessment", {
+       "pattern_id": "<concept_id>",
+       "pattern_name": "<human readable name>",
+       "status": "implemented" | "partial" | "missing",
+       "evidence": "<file path or description of what you found>",
+       "maturity_level": <1-6>
+   })
+   ```
+   Assess as many patterns as you can identify from the user's code. These stored \
+assessments are what `score_architecture` uses to compute deterministic scores.
+
+   Then narrate in 1-2 sentences: the single most significant finding — a missing \
 prerequisite, a conflict, or an alternative worth considering.
 
    **Fallback:** If subagents are not available, call `get_subgraph` directly with \
@@ -77,7 +93,8 @@ Then narrate in 1-2 sentences: the key insight the book provides.
 
 5. **CHECK COVERAGE** — Call `consultation_report` with the `consultation_id` to \
 check coverage gaps before synthesizing. If concept coverage or relationship type \
-coverage is low, go back and explore unexplored concepts or missing edge types.
+coverage is low, go back and explore unexplored concepts or missing edge types. \
+Optionally call `score_architecture` to compute the maturity scorecard.
 
 6. **SYNTHESIZE** — Deliver project-specific recommendations:
    - Ground every recommendation in the user's specific files and code
@@ -269,6 +286,32 @@ async def list_tools() -> list[Tool]:
                 "required": ["consultation_id"],
             },
         ),
+        Tool(
+            name="score_architecture",
+            description=(
+                "MATURITY SCORECARD — Deterministic architecture scoring from stored pattern "
+                "assessments. Reads pattern_assessment steps logged during graph traversal and "
+                "computes: maturity level (L1-L6), per-dimension radar scores (Robustness, "
+                "Coordination, Compliance, User Interaction, Agent Capabilities), gap analysis "
+                "with severity, recommended metrics from the book, and implementation roadmap. "
+                "Same consultation always produces same scores. Requires pattern_assessment "
+                "steps to have been logged during step 3 (traverse graph)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session to score",
+                    },
+                    "target_level": {
+                        "type": "integer",
+                        "description": "Override target maturity level (1-6, default: current + 1)",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
     ]
 
 
@@ -319,6 +362,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         result = await consultation_report(
             consultation_id=arguments.get("consultation_id", ""),
             compare_to=arguments.get("compare_to"),
+        )
+        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
+
+    if name == "score_architecture":
+        result = await score_architecture(
+            consultation_id=arguments.get("consultation_id", ""),
+            target_level=arguments.get("target_level"),
         )
         return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
@@ -385,6 +435,8 @@ parallel subagent (via the Agent tool) to explore its neighbourhood. Each subage
 `consultation_id` from step 2. Analyze relationships and return a compact summary \
 (~300 tokens) with key findings and discovered concept IDs. Merge the summaries. \
 If subagents are not available, call `get_subgraph` directly with compact defaults. \
+**IMPORTANT:** During traversal, log a `pattern_assessment` step for each pattern you \
+identify in my codebase (or confirm is missing). This enables deterministic scoring. \
 Then tell me in 1-2 sentences the single most significant finding from the graph.
 
 4. **Retrieve book passages** — Call `ask_book` scoped to the discovered concept \
@@ -392,9 +444,9 @@ IDs, passing the `consultation_id`. Use `suggested_questions` from the response 
 to ask deterministic follow-up questions. Cite chapter and page numbers. Then tell \
 me in 1-2 sentences the key insight the book provides.
 
-5. **Check coverage** — Call `consultation_report` with the `consultation_id` to \
-check coverage gaps. If concept or relationship type coverage is low, go back and \
-explore the gaps before synthesizing.
+5. **Check coverage and score** — Call `consultation_report` with the `consultation_id` \
+to check coverage gaps. Then call `score_architecture` to compute the maturity scorecard \
+with deterministic scores. If coverage is low, go back and explore the gaps.
 
 6. **Synthesize recommendations** — Deliver:
    - Before/after architecture diagrams rendered with `/generate-web-diagram` (HTML + \
