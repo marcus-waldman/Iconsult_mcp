@@ -102,7 +102,7 @@ async def embed_texts(
             "dimensions": dims,
         }).encode()
 
-        batch_timeout = min(300, max(60, len(batch_texts) // 10 * 10 + 60))
+        batch_timeout = min(300, max(15, len(batch_texts) * 5 + 10))
 
         def _make_request(p=payload, k=api_key, t=batch_timeout):
             req = urllib.request.Request(

@@ -8,7 +8,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
-- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`
+- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`
 - Developer docs: `docs/development.md`
 
 ## Key Commands
@@ -42,6 +42,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `get_subgraph(concept_ids, max_hops=2, confidence_threshold=0.5, max_edges=50, include_descriptions?, consultation_id?)` — QUERY PLANNER: priority-queue traversal; logs steps when `consultation_id` provided
 - `ask_book(question, concept_ids?, max_passages?, consultation_id?)` — DEEP CONTEXT: RAG search; returns `suggested_questions` from graph edges; logs steps when `consultation_id` provided
 - `consultation_report(consultation_id, compare_to?)` — COVERAGE CHECK: concept/relationship coverage %, passage diversity, gap identification, cross-session diff
+- `log_pattern_assessment(consultation_id, pattern_id, pattern_name, status, evidence?, maturity_level?)` — LOG ASSESSMENT: record a pattern assessment during graph traversal; status is "implemented", "partial", or "missing"; these feed into `score_architecture`
 - `score_architecture(consultation_id, target_level?)` — MATURITY SCORECARD: deterministic scoring from stored `pattern_assessment` steps; computes maturity level (L1-L6), 5 dimension radar scores, gap analysis with severity, recommended metrics, implementation roadmap
 
 ### Prompt
@@ -50,7 +51,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 ### Consulting workflow (server instructions)
 1. READ PROJECT — read user's codebase first
 2. MATCH CONCEPTS — `match_concepts` with project description → deterministic concept ranking + `consultation_id`
-3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `consultation_id`; log `pattern_assessment` steps for each pattern found/missing in user's code; merge summaries
+3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `consultation_id`; call `log_pattern_assessment` for each pattern found/missing in user's code; merge summaries
 4. RETRIEVE PASSAGES — `ask_book` scoped to discovered concept IDs with `consultation_id`; use `suggested_questions` for follow-ups
 5. CHECK COVERAGE + SCORE — `consultation_report` to verify coverage; `score_architecture` to compute deterministic maturity scorecard from stored pattern assessments
 6. SYNTHESIZE — before/after diagrams via `/generate-web-diagram` skill (HTML+Mermaid; ASCII only for <5 nodes), file-level changes, citations, prerequisite/conflict checks; comparison tables with 4+ rows rendered as HTML

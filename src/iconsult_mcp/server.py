@@ -21,6 +21,7 @@ from iconsult_mcp.tools.get_subgraph import get_subgraph
 from iconsult_mcp.tools.ask_book import ask_book
 from iconsult_mcp.tools.match_concepts import match_concepts
 from iconsult_mcp.tools.consultation_report import consultation_report
+from iconsult_mcp.tools.log_pattern_assessment import log_pattern_assessment
 from iconsult_mcp.tools.score_architecture import score_architecture
 
 logging.basicConfig(level=logging.INFO)
@@ -67,17 +68,10 @@ Each subagent should use this prompt template:
 Collect the subagent summaries and merge discovered concept IDs.
 
    **IMPORTANT — Log pattern assessments:** During traversal, for each architectural \
-pattern you identify in the user's codebase (or confirm is missing), log an assessment:
-   ```
-   log_consultation_step(consultation_id, "pattern_assessment", {
-       "pattern_id": "<concept_id>",
-       "pattern_name": "<human readable name>",
-       "status": "implemented" | "partial" | "missing",
-       "evidence": "<file path or description of what you found>",
-       "maturity_level": <1-6>
-   })
-   ```
-   Assess as many patterns as you can identify from the user's code. These stored \
+pattern you identify in the user's codebase (or confirm is missing), call \
+`log_pattern_assessment` with the `consultation_id`, `pattern_id`, `pattern_name`, \
+`status` ("implemented", "partial", or "missing"), `evidence`, and `maturity_level` (1-6). \
+Assess as many patterns as you can identify from the user's code. These stored \
 assessments are what `score_architecture` uses to compute deterministic scores.
 
    Then narrate in 1-2 sentences: the single most significant finding — a missing \
@@ -312,6 +306,46 @@ async def list_tools() -> list[Tool]:
                 "required": ["consultation_id"],
             },
         ),
+        Tool(
+            name="log_pattern_assessment",
+            description=(
+                "LOG ASSESSMENT — Record a pattern assessment for a consultation session. "
+                "Call this during graph traversal (step 3) for each architectural pattern you "
+                "identify in the user's codebase or confirm is missing. These stored assessments "
+                "are what score_architecture uses to compute deterministic maturity scores."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session ID from match_concepts",
+                    },
+                    "pattern_id": {
+                        "type": "string",
+                        "description": "The concept ID of the pattern being assessed",
+                    },
+                    "pattern_name": {
+                        "type": "string",
+                        "description": "Human-readable name of the pattern",
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["implemented", "partial", "missing"],
+                        "description": "Whether the pattern is implemented, partial, or missing in the codebase",
+                    },
+                    "evidence": {
+                        "type": "string",
+                        "description": "File path or description of what was found (or not found)",
+                    },
+                    "maturity_level": {
+                        "type": "integer",
+                        "description": "Assessed maturity level (1-6, default: 1)",
+                    },
+                },
+                "required": ["consultation_id", "pattern_id", "pattern_name", "status"],
+            },
+        ),
     ]
 
 
@@ -369,6 +403,17 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         result = await score_architecture(
             consultation_id=arguments.get("consultation_id", ""),
             target_level=arguments.get("target_level"),
+        )
+        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
+
+    if name == "log_pattern_assessment":
+        result = await log_pattern_assessment(
+            consultation_id=arguments.get("consultation_id", ""),
+            pattern_id=arguments.get("pattern_id", ""),
+            pattern_name=arguments.get("pattern_name", ""),
+            status=arguments.get("status", ""),
+            evidence=arguments.get("evidence", ""),
+            maturity_level=arguments.get("maturity_level", 1),
         )
         return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
@@ -435,7 +480,7 @@ parallel subagent (via the Agent tool) to explore its neighbourhood. Each subage
 `consultation_id` from step 2. Analyze relationships and return a compact summary \
 (~300 tokens) with key findings and discovered concept IDs. Merge the summaries. \
 If subagents are not available, call `get_subgraph` directly with compact defaults. \
-**IMPORTANT:** During traversal, log a `pattern_assessment` step for each pattern you \
+**IMPORTANT:** During traversal, call `log_pattern_assessment` for each pattern you \
 identify in my codebase (or confirm is missing). This enables deterministic scoring. \
 Then tell me in 1-2 sentences the single most significant finding from the graph.
 
