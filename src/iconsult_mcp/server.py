@@ -19,6 +19,8 @@ from iconsult_mcp.tools.health import health_check
 from iconsult_mcp.tools.list_concepts import list_concepts
 from iconsult_mcp.tools.get_subgraph import get_subgraph
 from iconsult_mcp.tools.ask_book import ask_book
+from iconsult_mcp.tools.match_concepts import match_concepts
+from iconsult_mcp.tools.consultation_report import consultation_report
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,11 +37,10 @@ concepts, their relationships, and full book text.
 current architecture, tech stack, and pain points before consulting the graph. \
 Then narrate in 1-2 sentences: what you found and what the core problem is.
 
-2. **MAP TO CONCEPTS** — Call `list_concepts` to browse the compact concept catalogue \
-(returns id, name, category by default). Use `search` to filter by name if you already \
-know what you're looking for. Only pass `include_definitions=true` if you need the full \
-definition text. Match what you see in the user's code to concept IDs. \
-Then narrate in 1-2 sentences: which concepts matched and why they fit.
+2. **MATCH CONCEPTS** — Call `match_concepts` with a concise project description. \
+This deterministically embeds the description and returns ranked concept matches with \
+a `consultation_id` that tracks the session. The same description always produces the \
+same concept ranking. Use `list_concepts` only for browsing/filtering the full catalogue.
 
 3. **TRAVERSE GRAPH (scatter-gather)** — For each matched seed concept, spawn a \
 parallel subagent (via the Agent tool) to explore its neighbourhood independently. \
@@ -49,7 +50,7 @@ Each subagent should use this prompt template:
    You are a graph analysis subagent. Given this architectural context:
    {architectural_summary}
    Explore concept "{concept_name}" (ID: {concept_id}).
-   Call get_subgraph(concept_ids=["{concept_id}"], max_hops=1, include_descriptions=true).
+   Call get_subgraph(concept_ids=["{concept_id}"], max_hops=1, include_descriptions=true, consultation_id="{consultation_id}").
    Analyze relationships using these types:
    - uses / component_of — what the pattern includes
    - extends / specializes — more specific variants
@@ -61,7 +62,8 @@ Each subagent should use this prompt template:
    Keep response under 300 tokens.
    ```
 
-   Collect the subagent summaries and merge discovered concept IDs. \
+   Pass `consultation_id` from step 2 to `get_subgraph` so traversal steps are logged. \
+Collect the subagent summaries and merge discovered concept IDs. \
 Then narrate in 1-2 sentences: the single most significant finding — a missing \
 prerequisite, a conflict, or an alternative worth considering.
 
@@ -69,10 +71,15 @@ prerequisite, a conflict, or an alternative worth considering.
 compact defaults (omit optional parameters for the smallest useful response).
 
 4. **RETRIEVE PASSAGES** — Call `ask_book` scoped to concept IDs discovered in \
-step 3. This retrieves actual book text with chapter/page citations. \
+step 3, passing `consultation_id` for logging. Use `suggested_questions` from the \
+response to ask deterministic follow-up questions derived from graph edges. \
 Then narrate in 1-2 sentences: the key insight the book provides.
 
-5. **SYNTHESIZE** — Deliver project-specific recommendations:
+5. **CHECK COVERAGE** — Call `consultation_report` with the `consultation_id` to \
+check coverage gaps before synthesizing. If concept coverage or relationship type \
+coverage is low, go back and explore unexplored concepts or missing edge types.
+
+6. **SYNTHESIZE** — Deliver project-specific recommendations:
    - Ground every recommendation in the user's specific files and code
    - Render before/after architecture diagrams using the `/generate-web-diagram` skill \
 (writes a self-contained HTML file with Mermaid; opens in browser). Only fall back to \
@@ -113,12 +120,40 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="match_concepts",
+            description=(
+                "ENTRY POINT — Deterministically match a project description to knowledge "
+                "graph concepts via embedding similarity. Returns ranked concepts with scores "
+                "and creates a consultation_id that tracks the session. The same description "
+                "always produces the same concept ranking and fingerprint. Pass the returned "
+                "consultation_id to get_subgraph and ask_book for step logging."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_description": {
+                        "type": "string",
+                        "description": "Free-text description of the user's project, architecture, and pain points",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum concepts to return (1-50, default: 15)",
+                    },
+                    "similarity_threshold": {
+                        "type": "number",
+                        "description": "Minimum cosine similarity to include (0.0-1.0, default: 0.3)",
+                    },
+                },
+                "required": ["project_description"],
+            },
+        ),
+        Tool(
             name="list_concepts",
             description=(
-                "ENTRY POINT — List all 138 concepts in the knowledge graph. Returns compact "
+                "BROWSE — List all 138 concepts in the knowledge graph. Returns compact "
                 "output (id, name, category) by default. Use search to filter by name, and "
-                "include_definitions for full definition text. Call this after reading the "
-                "user's codebase to map their patterns to concept IDs for get_subgraph and ask_book."
+                "include_definitions for full definition text. Use this to browse the catalogue; "
+                "for consultation workflows, prefer match_concepts as the entry point."
             ),
             inputSchema={
                 "type": "object",
@@ -139,11 +174,11 @@ async def list_tools() -> list[Tool]:
             name="get_subgraph",
             description=(
                 "QUERY PLANNER — Bounded graph traversal from seed concepts. Given one or "
-                "more concept IDs (from list_concepts), performs BFS up to max_hops and "
-                "returns all reachable nodes and edges. Use relationship types to discover "
-                "what the user is missing: alternative_to for competing approaches, requires "
-                "for prerequisites, conflicts_with for incompatibilities, complements for "
-                "synergies. Feed discovered concept IDs into ask_book for supporting text."
+                "more concept IDs (from match_concepts or list_concepts), performs BFS up to "
+                "max_hops and returns all reachable nodes and edges. Use relationship types to "
+                "discover what the user is missing: alternative_to for competing approaches, "
+                "requires for prerequisites, conflicts_with for incompatibilities, complements "
+                "for synergies. Pass consultation_id to log traversal steps for coverage tracking."
             ),
             inputSchema={
                 "type": "object",
@@ -169,6 +204,10 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "description": "Include edge description text (default: false)",
                     },
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "Optional consultation ID from match_concepts to log this step",
+                    },
                 },
                 "required": ["concept_ids"],
             },
@@ -179,8 +218,8 @@ async def list_tools() -> list[Tool]:
                 "DEEP CONTEXT — RAG search against book sections. Embeds a natural language "
                 "question and returns the most relevant book passages with full text, chapter, "
                 "page numbers, and section title. ALWAYS scope with concept_ids from "
-                "get_subgraph for precision — unscoped queries search the entire book and "
-                "may return less relevant results."
+                "get_subgraph for precision. Returns suggested_questions derived deterministically "
+                "from graph edges. Pass consultation_id to log retrieval steps."
             ),
             inputSchema={
                 "type": "object",
@@ -198,8 +237,36 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "Maximum number of passages to return (default: 3)",
                     },
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "Optional consultation ID from match_concepts to log this step",
+                    },
                 },
                 "required": ["question"],
+            },
+        ),
+        Tool(
+            name="consultation_report",
+            description=(
+                "COVERAGE CHECK — Compute coverage metrics for a consultation session. "
+                "Shows concept coverage %, relationship type coverage, passage diversity, "
+                "whether prerequisite/conflict edges were checked, and specific gaps. "
+                "Call before synthesizing to ensure thorough coverage. Optionally compare "
+                "two sessions with the same project fingerprint to see diffs."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session to evaluate",
+                    },
+                    "compare_to": {
+                        "type": "string",
+                        "description": "Optional second consultation ID to diff against",
+                    },
+                },
+                "required": ["consultation_id"],
             },
         ),
     ]
@@ -211,6 +278,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
     if name == "health_check":
         result = await health_check()
+        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
+
+    if name == "match_concepts":
+        result = await match_concepts(
+            project_description=arguments.get("project_description", ""),
+            max_results=arguments.get("max_results", 15),
+            similarity_threshold=arguments.get("similarity_threshold", 0.3),
+        )
         return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
     if name == "list_concepts":
@@ -227,6 +302,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             confidence_threshold=arguments.get("confidence_threshold", 0.5),
             max_edges=arguments.get("max_edges", 50),
             include_descriptions=arguments.get("include_descriptions", False),
+            consultation_id=arguments.get("consultation_id"),
         )
         return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
@@ -235,6 +311,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             question=arguments.get("question", ""),
             concept_ids=arguments.get("concept_ids"),
             max_passages=arguments.get("max_passages", 3),
+            consultation_id=arguments.get("consultation_id"),
+        )
+        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
+
+    if name == "consultation_report":
+        result = await consultation_report(
+            consultation_id=arguments.get("consultation_id", ""),
+            compare_to=arguments.get("compare_to"),
         )
         return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
@@ -291,24 +375,28 @@ Please follow this workflow:
 architecture, tech stack, and patterns in use. Then tell me in 1-2 sentences \
 what you found and what you see as the core problem.
 
-2. **Map to concepts** — Call `list_concepts` to browse the compact concept catalogue \
-(id, name, category). Use `search` to filter if needed. Identify which concepts match \
-patterns I already use and which might address my needs. Then tell me in 1-2 sentences \
-which concepts matched.
+2. **Match concepts** — Call `match_concepts` with a concise project description \
+summarizing the architecture and pain points you identified. This returns deterministic \
+concept rankings and a `consultation_id` for tracking the session.
 
 3. **Traverse the graph (scatter-gather)** — For each matched seed concept, spawn a \
 parallel subagent (via the Agent tool) to explore its neighbourhood. Each subagent calls \
-`get_subgraph` with that single concept and `include_descriptions=true`, analyzes the \
-relationships, and returns a compact summary (~300 tokens) with key findings and \
-discovered concept IDs. Merge the summaries. If subagents are not available, call \
-`get_subgraph` directly with compact defaults. Then tell me in 1-2 sentences the single \
-most significant finding from the graph.
+`get_subgraph` with that single concept, `include_descriptions=true`, and the \
+`consultation_id` from step 2. Analyze relationships and return a compact summary \
+(~300 tokens) with key findings and discovered concept IDs. Merge the summaries. \
+If subagents are not available, call `get_subgraph` directly with compact defaults. \
+Then tell me in 1-2 sentences the single most significant finding from the graph.
 
 4. **Retrieve book passages** — Call `ask_book` scoped to the discovered concept \
-IDs for authoritative guidance. Cite chapter and page numbers. Then tell me in \
-1-2 sentences the key insight the book provides.
+IDs, passing the `consultation_id`. Use `suggested_questions` from the response \
+to ask deterministic follow-up questions. Cite chapter and page numbers. Then tell \
+me in 1-2 sentences the key insight the book provides.
 
-5. **Synthesize recommendations** — Deliver:
+5. **Check coverage** — Call `consultation_report` with the `consultation_id` to \
+check coverage gaps. If concept or relationship type coverage is low, go back and \
+explore the gaps before synthesizing.
+
+6. **Synthesize recommendations** — Deliver:
    - Before/after architecture diagrams rendered with `/generate-web-diagram` (HTML + \
 Mermaid, opens in browser). Use ASCII only for trivial diagrams with fewer than ~5 nodes.
    - Specific file-level changes mapped to my codebase

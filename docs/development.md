@@ -9,10 +9,12 @@ src/iconsult_mcp/
   db.py              DuckDB/MotherDuck connection + schema
   embed.py           OpenAI embeddings + Claude API (raw urllib)
   tools/
-    health.py        Health check
-    list_concepts.py Concept catalogue
-    get_subgraph.py  Graph traversal (BFS)
-    ask_book.py      RAG search against book sections
+    health.py              Health check
+    match_concepts.py      Deterministic concept matching (consultation entry point)
+    list_concepts.py       Concept catalogue browser
+    get_subgraph.py        Graph traversal (BFS) with consultation logging
+    ask_book.py            RAG search with suggested questions + consultation logging
+    consultation_report.py Coverage metrics + cross-session comparison
 
 scripts/
   run_pipeline.py    Pipeline orchestrator
@@ -40,8 +42,9 @@ literature/
 ## Database
 
 - MotherDuck database name: `iconsult` (override with `ICONSULT_DB` env var)
-- 6 tables + 1 metadata table (see `db.py` for schema)
+- 7 tables + 1 metadata table (see `db.py` for schema)
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
+- `consultations` table tracks reproducible consultation sessions (fingerprint, matched concepts, step log)
 - Scripts use `INSERT OR REPLACE` which DuckDB supports
 
 ## Pipeline
@@ -84,6 +87,36 @@ py scripts/run_pipeline.py --reset      # Clear everything and start over
 - Both files are Mathpix-extracted LaTeX-flavored markdown (uses `\section*{}` not `#`)
 - Book content starts at line ~985 (Part 1); chapters marked by `\section*{N}` then `\section*{Title}`
 - Index has OCR artifacts: merged page numbers, separated name/number blocks
+
+## MCP Tools
+
+| Tool | Role | Key behavior |
+|------|------|-------------|
+| `health_check` | Diagnostics | Server health + graph stats |
+| `match_concepts` | **Entry point** | Embeds project description → deterministic concept ranking; creates `consultation_id` + `project_fingerprint` (SHA-256 of normalized text); same input always produces same output |
+| `list_concepts` | Browse | Compact catalogue (id, name, category); use `search` to filter by name |
+| `get_subgraph` | Query planner | Priority-queue BFS from seed concepts; pass `consultation_id` to log traversal steps (seeds, discovered concepts, relationship types) |
+| `ask_book` | Deep context | RAG search over book sections; returns `suggested_questions` derived deterministically from graph edge templates; pass `consultation_id` to log retrieval steps |
+| `consultation_report` | Coverage check | Computes concept coverage %, relationship type coverage, passage diversity, prerequisite/conflict checks, gap list; optionally diffs two sessions with same fingerprint |
+
+### Reproducible Consultations
+
+The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report` pipeline makes consultations reproducible:
+
+1. **Deterministic inputs** — `match_concepts` replaces LLM free-choice concept selection with embedding similarity. Same description → same fingerprint → same concept ranking.
+2. **Session tracking** — Every call to `get_subgraph` and `ask_book` with a `consultation_id` logs what was explored (concepts, relationship types, chapters, questions).
+3. **Coverage gaps** — `consultation_report` computes what percentage of matched concepts were explored, which relationship types were seen, and flags missing prerequisites/conflicts.
+4. **Cross-session comparison** — `consultation_report(id, compare_to=other_id)` diffs two sessions with the same fingerprint to show concept overlap, coverage deltas, and relationship type differences.
+5. **Canonical questions** — `ask_book` returns `suggested_questions` generated from graph edge templates (e.g., "What are the prerequisites for X and how does Y fulfill them?"), reducing question formulation variance.
+
+### Consulting Workflow (6 steps)
+
+1. **READ PROJECT** — Read the user's codebase
+2. **MATCH CONCEPTS** — `match_concepts` with project description → concept ranking + `consultation_id`
+3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents
+4. **RETRIEVE PASSAGES** — `ask_book` scoped to discovered concepts with `consultation_id`; follow `suggested_questions`
+5. **CHECK COVERAGE** — `consultation_report` to verify gaps before synthesis
+6. **SYNTHESIZE** — Diagrams, file-level changes, citations, prerequisite/conflict checks
 
 ## Technical Notes
 

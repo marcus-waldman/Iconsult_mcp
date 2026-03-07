@@ -195,6 +195,19 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
             except Exception as e:
                 logger.debug(f"Could not create HNSW index on {table}: {e}")
 
+    # --- consultations: reproducible consultation sessions ---
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS consultations (
+            id VARCHAR PRIMARY KEY,
+            project_fingerprint VARCHAR NOT NULL,
+            project_description TEXT NOT NULL,
+            matched_concept_ids VARCHAR[] NOT NULL,
+            matched_scores FLOAT[],
+            steps JSON DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+
     logger.info("Schema initialized successfully")
 
 
@@ -521,6 +534,90 @@ def get_subgraph(
         "truncated": total_edges_found > max_edges,
         "total_edges_found": total_edges_found,
     }
+
+
+def create_consultation(
+    consultation_id: str,
+    fingerprint: str,
+    description: str,
+    concept_ids: list[str],
+    scores: list[float],
+) -> None:
+    """Create a new consultation record."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT OR REPLACE INTO consultations (id, project_fingerprint, project_description, matched_concept_ids, matched_scores) VALUES (?, ?, ?, ?, ?)",
+        [consultation_id, fingerprint, description, concept_ids, scores],
+    )
+
+
+def log_consultation_step(
+    consultation_id: str,
+    step_type: str,
+    data: dict,
+) -> None:
+    """Append a step to a consultation's steps JSON array."""
+    import json as _json
+
+    conn = get_connection()
+    # Read current steps
+    row = conn.execute(
+        "SELECT steps FROM consultations WHERE id = ?",
+        [consultation_id],
+    ).fetchone()
+    if not row:
+        return
+
+    current_steps = _json.loads(row[0]) if row[0] else []
+    current_steps.append({"type": step_type, **data})
+    conn.execute(
+        "UPDATE consultations SET steps = ? WHERE id = ?",
+        [_json.dumps(current_steps), consultation_id],
+    )
+
+
+def get_consultation(consultation_id: str) -> dict | None:
+    """Return a full consultation record."""
+    import json as _json
+
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id, project_fingerprint, project_description, matched_concept_ids, matched_scores, steps, created_at FROM consultations WHERE id = ?",
+        [consultation_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "project_fingerprint": row[1],
+        "project_description": row[2],
+        "matched_concept_ids": row[3],
+        "matched_scores": row[4],
+        "steps": _json.loads(row[5]) if row[5] else [],
+        "created_at": str(row[6]),
+    }
+
+
+def get_consultations_by_fingerprint(fingerprint: str) -> list[dict]:
+    """Find all consultation sessions for the same project fingerprint."""
+    import json as _json
+
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, project_fingerprint, matched_concept_ids, matched_scores, steps, created_at FROM consultations WHERE project_fingerprint = ? ORDER BY created_at DESC",
+        [fingerprint],
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "project_fingerprint": r[1],
+            "matched_concept_ids": r[2],
+            "matched_scores": r[3],
+            "steps": _json.loads(r[4]) if r[4] else [],
+            "created_at": str(r[5]),
+        }
+        for r in rows
+    ]
 
 
 def search_sections_by_embedding(

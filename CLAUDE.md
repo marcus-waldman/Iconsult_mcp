@@ -8,7 +8,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
-- Tools: `tools/health.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`
+- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`
 - Developer docs: `docs/development.md`
 
 ## Key Commands
@@ -24,24 +24,27 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 
 ## Database
 - MotherDuck database name: `Iconsult` (override with `ICONSULT_DB` env var)
-- 6 tables + 1 metadata table (see db.py schema)
+- 7 tables + 1 metadata table (see db.py schema); `consultations` table tracks reproducible sessions
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
 
 ## MCP Tools
 - `health_check` — server health + graph scope
-- `list_concepts(search?, include_definitions?)` — ENTRY POINT: compact flat list (id, name, category) by default; `search` filters by name; `include_definitions=true` adds definition text
-- `get_subgraph(concept_ids, max_hops=2, confidence_threshold=0.5, max_edges=50, include_descriptions?)` — QUERY PLANNER: priority-queue traversal (highest confidence first); compact edges (from/to/type/confidence); `include_descriptions=true` adds edge descriptions; returns `truncated` flag when edges exceed `max_edges`
-- `ask_book(question, concept_ids?, max_passages?)` — DEEP CONTEXT: RAG search; always scope with concept_ids from get_subgraph
+- `match_concepts(project_description, max_results?, similarity_threshold?)` — ENTRY POINT: deterministic embedding match; creates `consultation_id` for session tracking; same description → same ranking
+- `list_concepts(search?, include_definitions?)` — BROWSE: compact flat list (id, name, category); use for catalogue browsing, not as consultation entry point
+- `get_subgraph(concept_ids, max_hops=2, confidence_threshold=0.5, max_edges=50, include_descriptions?, consultation_id?)` — QUERY PLANNER: priority-queue traversal; logs steps when `consultation_id` provided
+- `ask_book(question, concept_ids?, max_passages?, consultation_id?)` — DEEP CONTEXT: RAG search; returns `suggested_questions` from graph edges; logs steps when `consultation_id` provided
+- `consultation_report(consultation_id, compare_to?)` — COVERAGE CHECK: concept/relationship coverage %, passage diversity, gap identification, cross-session diff
 
 ### Prompt
-- `consult(context)` — guided architecture consultation; interpolates user's project context into the full 5-step workflow
+- `consult(context)` — guided architecture consultation; interpolates user's project context into the full 6-step workflow
 
 ### Consulting workflow (server instructions)
 1. READ PROJECT — read user's codebase first
-2. MAP TO CONCEPTS — `list_concepts` (compact defaults) to match patterns to concept IDs; use `search` to filter
-3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `max_hops=1, include_descriptions=true`; merge summaries. Fallback: call `get_subgraph` directly with compact defaults
-4. RETRIEVE PASSAGES — `ask_book` scoped to discovered concept IDs
-5. SYNTHESIZE — before/after diagrams via `/generate-web-diagram` skill (HTML+Mermaid; ASCII only for <5 nodes), file-level changes, citations, prerequisite/conflict checks; comparison tables with 4+ rows rendered as HTML
+2. MATCH CONCEPTS — `match_concepts` with project description → deterministic concept ranking + `consultation_id`
+3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `consultation_id`; merge summaries. Fallback: call `get_subgraph` directly with compact defaults
+4. RETRIEVE PASSAGES — `ask_book` scoped to discovered concept IDs with `consultation_id`; use `suggested_questions` for follow-ups
+5. CHECK COVERAGE — `consultation_report` to verify concept/relationship coverage before synthesis
+6. SYNTHESIZE — before/after diagrams via `/generate-web-diagram` skill (HTML+Mermaid; ASCII only for <5 nodes), file-level changes, citations, prerequisite/conflict checks; comparison tables with 4+ rows rendered as HTML
 
 ## Literature
 - Book markdown: `literature/Arsanjani and Bustos - 2026 - ....md`
