@@ -16,6 +16,16 @@ src/iconsult_mcp/
     ask_book.py            RAG search with suggested questions + consultation logging
     consultation_report.py Coverage metrics + cross-session comparison
 
+    score_architecture.py  Deterministic maturity scoring
+
+tests/
+  cases.py           Test case definitions (12 OpenAI agent examples)
+  conftest.py        Shared fixtures (DB session, consultation cleanup)
+  test_match_concepts.py      Concept matching quality + determinism
+  test_subgraph.py            Graph traversal validation
+  test_score_architecture.py  Scoring pipeline + determinism
+  test_consultation_flow.py   End-to-end consultation workflow
+
 scripts/
   run_pipeline.py    Pipeline orchestrator
   parse_index.py     Phase 1a
@@ -119,6 +129,72 @@ The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report`
 4. **RETRIEVE PASSAGES** — `ask_book` scoped to discovered concepts with `consultation_id`; follow `suggested_questions`
 5. **CHECK COVERAGE + SCORE** — `consultation_report` to verify gaps; `score_architecture` for deterministic maturity scorecard
 6. **SYNTHESIZE** — Diagrams, file-level changes, citations, prerequisite/conflict checks, scorecard visualization
+
+## Testing
+
+Integration tests validate the MCP tools against the live MotherDuck database. They require `MOTHERDUCK_TOKEN` and `OPENAI_API_KEY` environment variables.
+
+### Running tests
+
+```bash
+pip install -e ".[dev]"           # Install pytest + pytest-asyncio
+py -m pytest tests/ -v            # Run all tests
+py -m pytest tests/ -v -k financial_research  # Run one test case
+py -m pytest tests/test_match_concepts.py -v  # Run one test module
+```
+
+### Test cases
+
+Test cases live in `tests/cases.py`. Each case represents a real-world agent architecture derived from the [openai/openai-agents-python](https://github.com/openai/openai-agents-python/tree/main/examples) examples:
+
+| Case ID | Source | Patterns tested |
+|---------|--------|-----------------|
+| `financial_research` | `examples/financial_research_agent` | Supervisor, multi-agent planning, delegation |
+| `customer_service` | `examples/customer_service` | Agent router, handoffs |
+| `research_bot` | `examples/research_bot` | Supervisor, parallel search, planning |
+| `deterministic_pipeline` | `examples/agent_patterns/deterministic.py` | Sequential pipeline |
+| `routing` | `examples/agent_patterns/routing.py` | Agent router |
+| `agents_as_tools` | `examples/agent_patterns/agents_as_tools.py` | Tool-based delegation |
+| `llm_as_judge` | `examples/agent_patterns/llm_as_a_judge.py` | Instruction fidelity, self-improvement |
+| `parallelization` | `examples/agent_patterns/parallelization.py` | Majority voting |
+| `human_in_the_loop` | `examples/agent_patterns/human_in_the_loop.py` | HITL, agent-calls-human |
+| `guardrails` | `examples/agent_patterns/input_guardrails.py` | Instruction fidelity auditing |
+| `handoffs` | `examples/handoffs` | Agent-to-agent delegation |
+| `mcp_integration` | `examples/mcp` | Tool use, MCP protocol |
+
+### Adding a new test case
+
+Add a dict to the `CASES` list in `tests/cases.py`:
+
+```python
+{
+    "id": "my_new_case",
+    "name": "My New Architecture",
+    "source": "examples/my_example",
+    "description": "Description fed to match_concepts...",
+    "expected_concepts": ["concept_id_1", "concept_id_2"],  # Must appear in top-15
+    "pattern_assessments": [  # For score_architecture tests
+        {
+            "pattern_id": "concept_id_1",
+            "pattern_name": "Human Name",
+            "status": "implemented",  # or "partial" or "missing"
+            "evidence": "file.py does X",
+            "maturity_level": 2,
+        },
+    ],
+}
+```
+
+All parameterized tests automatically pick up new cases. To find valid concept IDs, use `py -c "from iconsult_mcp.db import get_all_concepts, get_connection; get_connection(); [print(c['id'], c['name']) for c in get_all_concepts()]"`.
+
+### Test modules
+
+| Module | What it validates |
+|--------|-------------------|
+| `test_match_concepts.py` | Expected concepts appear in top-15 matches; scores are sorted descending; same description produces identical ranking |
+| `test_subgraph.py` | Traversal returns nodes and edges; seeds marked correctly; valid relationship types; `max_edges` respected |
+| `test_score_architecture.py` | Output structure (maturity, dimensions, gaps, roadmap); deterministic scoring; empty-consultation error; gap analysis flags missing patterns |
+| `test_consultation_flow.py` | Full 6-step workflow: match → subgraph → assess → ask_book → report → score |
 
 ## Technical Notes
 

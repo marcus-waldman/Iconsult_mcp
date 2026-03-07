@@ -16,6 +16,14 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `iconsult-mcp` — run MCP server
 - `iconsult-mcp --check` — health check
 - `py scripts/run_pipeline.py` — run full knowledge graph pipeline
+- `py -m pytest tests/ -v` — run integration tests (requires MOTHERDUCK_TOKEN + OPENAI_API_KEY)
+- `py -m pytest tests/test_match_concepts.py -v` — run concept matching tests only
+
+## Testing
+- Integration tests in `tests/` — require MOTHERDUCK_TOKEN and OPENAI_API_KEY env vars
+- Test cases in `tests/cases.py` — 12 architectures derived from openai/openai-agents-python examples
+- Adding a test case = adding a dict to `CASES` in `tests/cases.py` (id, description, expected_concepts, pattern_assessments)
+- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_consultation_flow.py` (end-to-end)
 
 ## Environment Variables
 - `MOTHERDUCK_TOKEN` — required for database
