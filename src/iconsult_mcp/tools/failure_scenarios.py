@@ -1,0 +1,659 @@
+"""Generate concrete failure scenario walkthroughs for missing/partial patterns.
+
+Deterministic — same consultation always produces the same scenarios.
+No LLM calls: composes traces from pattern assessments, requires edges,
+and book-derived failure templates.
+"""
+
+from iconsult_mcp.db import get_consultation, get_concept_relationships
+from iconsult_mcp.tools.score_architecture import MATURITY_MODEL, PATTERN_METRICS
+
+# ---------------------------------------------------------------------------
+# Ch. 7 five-step failure recovery chain (p. 206)
+# ---------------------------------------------------------------------------
+
+FAILURE_CHAIN: list[dict] = [
+    {
+        "step": 1,
+        "pattern_id": "adaptive_retry_pattern",
+        "pattern_name": "Simple Retry",
+        "action": "Agent fails on API/LLM call",
+        "recovery": "Retry with exponential backoff",
+        "chapter": 7,
+        "page": "214",
+    },
+    {
+        "step": 2,
+        "pattern_id": "auto_healing_pattern",
+        "pattern_name": "Auto-Healing Agent Resuscitation",
+        "action": "Retries exhausted, agent process crashed",
+        "recovery": "Automatically restart the agent process",
+        "chapter": 7,
+        "page": "216",
+    },
+    {
+        "step": 3,
+        "pattern_id": "fallback_model_invocation_pattern",
+        "pattern_name": "Fallback Model Invocation",
+        "action": "Agent still failing after restart",
+        "recovery": "Switch to fallback model or redundant agent",
+        "chapter": 7,
+        "page": "238",
+    },
+    {
+        "step": 4,
+        "pattern_id": "agent_calls_human_pattern",
+        "pattern_name": "Delayed Escalation / Agent Calls Human",
+        "action": "All automated recovery paths exhausted",
+        "recovery": "Escalate to human operator with full context",
+        "chapter": 8,
+        "page": "251",
+    },
+    {
+        "step": 5,
+        "pattern_id": "watchdog_timeout_pattern",
+        "pattern_name": "Watchdog Timeout Supervisor",
+        "action": "Agent hangs or enters infinite loop",
+        "recovery": "Timeout kills unresponsive agent, alerts system",
+        "chapter": 7,
+        "page": "212",
+    },
+]
+
+# ---------------------------------------------------------------------------
+# Per-pattern failure templates — derived from book Problem/Context sections
+# ---------------------------------------------------------------------------
+
+PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
+    # Level 1
+    "single_agent_baseline_pattern": {
+        "trigger": "Core agent logic has no structured task execution",
+        "failure_mode": "Unpredictable output, no tool calling, no task completion tracking",
+        "cascade": (
+            "Agent produces free-form text instead of structured actions → "
+            "downstream consumers cannot parse output → pipeline stalls"
+        ),
+        "book_ref": {"chapter": 9, "page": "309", "section": "Single Agent Baseline"},
+    },
+    "function_calling_pattern": {
+        "trigger": "Agent cannot invoke external tools or APIs",
+        "failure_mode": "Agent hallucinates tool results instead of calling them",
+        "cascade": (
+            "Agent fabricates API response → decisions based on hallucinated data → "
+            "incorrect outputs propagate to downstream agents"
+        ),
+        "book_ref": {"chapter": 9, "page": "309", "section": "Function Calling"},
+    },
+    "watchdog_timeout_pattern": {
+        "trigger": "External API hangs or agent enters infinite loop",
+        "failure_mode": "Agent blocks indefinitely with no timeout",
+        "cascade": (
+            "Agent hangs on API call → orchestrator waits forever → "
+            "all downstream agents starve → entire pipeline frozen → "
+            "user sees infinite spinner, resources consumed silently"
+        ),
+        "book_ref": {"chapter": 7, "page": "212", "section": "Watchdog Timeout Supervisor"},
+    },
+    "agent_calls_human_pattern": {
+        "trigger": "Agent encounters ambiguous or high-risk decision",
+        "failure_mode": "No escalation path to human operator",
+        "cascade": (
+            "Agent makes autonomous decision on edge case → "
+            "incorrect action taken (e.g., wrong loan approval) → "
+            "no human review catches the error → "
+            "compliance violation or financial loss"
+        ),
+        "book_ref": {"chapter": 8, "page": "251", "section": "Agent Calls Human"},
+    },
+    # Level 2
+    "agent_router_pattern": {
+        "trigger": "Incoming request doesn't match any known intent",
+        "failure_mode": "No routing logic; all requests go to one agent",
+        "cascade": (
+            "Specialized request hits wrong agent → agent lacks domain knowledge → "
+            "poor quality response → user retries → repeated failures"
+        ),
+        "book_ref": {"chapter": 5, "page": "142", "section": "Agent Router"},
+    },
+    "tool_use_pattern": {
+        "trigger": "Agent needs to select from multiple available tools",
+        "failure_mode": "Hardcoded tool selection, no dynamic dispatch",
+        "cascade": (
+            "New tool added but agent can't discover it → "
+            "misses optimal tool for task → suboptimal results or failure"
+        ),
+        "book_ref": {"chapter": 9, "page": "309", "section": "Dynamic Tool Selection"},
+    },
+    "adaptive_retry_pattern": {
+        "trigger": "Transient API failure (503, timeout, rate limit)",
+        "failure_mode": "Single failure crashes the entire pipeline",
+        "cascade": (
+            "API returns 503 → no retry logic → exception propagates → "
+            "orchestrator receives unhandled error → pipeline halts → "
+            "user sees error, task lost"
+        ),
+        "book_ref": {"chapter": 7, "page": "214", "section": "Adaptive Retry"},
+    },
+    # Level 3
+    "structured_reasoning_and_self": {
+        "trigger": "Agent produces incorrect reasoning on first attempt",
+        "failure_mode": "No self-critique or reflection loop",
+        "cascade": (
+            "Agent generates flawed analysis → no verification step → "
+            "flawed output passed as final → downstream decisions based on errors"
+        ),
+        "book_ref": {"chapter": 9, "page": "309", "section": "Structured Reasoning"},
+    },
+    "instruction_fidelity_auditing_pattern": {
+        "trigger": "Agent deviates from system instructions or policy",
+        "failure_mode": "No audit trail of instruction adherence",
+        "cascade": (
+            "Agent ignores safety guardrails → produces non-compliant output → "
+            "violation goes undetected until production incident → "
+            "regulatory or reputational risk"
+        ),
+        "book_ref": {"chapter": 6, "page": "177", "section": "Instruction Fidelity Auditing"},
+    },
+    "adaptive_retry_with_prompt_mutation": {
+        "trigger": "Agent fails deterministically on same input",
+        "failure_mode": "Simple retry repeats the same failing prompt",
+        "cascade": (
+            "Prompt misinterpretation causes wrong output → retry sends same prompt → "
+            "same wrong output repeated N times → retries exhausted → "
+            "task fails with no recovery"
+        ),
+        "book_ref": {"chapter": 7, "page": "214", "section": "Adaptive Retry with Prompt Mutation"},
+    },
+    # Level 4
+    "supervisor_architecture": {
+        "trigger": "Multiple agents need coordination for complex task",
+        "failure_mode": "No central supervisor; agents operate independently",
+        "cascade": (
+            "Agents produce conflicting outputs → no arbitration → "
+            "results merged incorrectly → contradictory final output"
+        ),
+        "book_ref": {"chapter": 5, "page": "142", "section": "Supervisor Architecture"},
+    },
+    "multi_agent_planning": {
+        "trigger": "Complex task requires decomposition into subtasks",
+        "failure_mode": "No planning phase; agents given full task directly",
+        "cascade": (
+            "Agent overwhelmed by task complexity → produces shallow output → "
+            "critical subtasks missed → incomplete result"
+        ),
+        "book_ref": {"chapter": 5, "page": "142", "section": "Multi-Agent Planning"},
+    },
+    "shared_epistemic_memory": {
+        "trigger": "Agent B needs context from Agent A's earlier work",
+        "failure_mode": "No shared memory; each agent starts from scratch",
+        "cascade": (
+            "Agent B repeats Agent A's work → wasted tokens and time → "
+            "possible contradictions between agents → inconsistent output"
+        ),
+        "book_ref": {"chapter": 5, "page": "142", "section": "Shared Epistemic Memory"},
+    },
+    "event_driven_reactivity": {
+        "trigger": "System state changes that require immediate response",
+        "failure_mode": "Polling-only or no event system",
+        "cascade": (
+            "Critical event (e.g., security breach) occurs → "
+            "no event bus to propagate signal → agents continue normal operation → "
+            "delayed response to incident"
+        ),
+        "book_ref": {"chapter": 10, "page": "314", "section": "Event-Driven Reactivity"},
+    },
+    "tool_and_agent_registry": {
+        "trigger": "New agent or tool added to the system",
+        "failure_mode": "Hardcoded agent/tool references throughout",
+        "cascade": (
+            "New capability added but not discoverable → "
+            "orchestrator can't route to it → capability unused → "
+            "manual config changes needed for every addition"
+        ),
+        "book_ref": {"chapter": 10, "page": "311", "section": "Tool and Agent Registry"},
+    },
+    "agent_authentication_and_authorization": {
+        "trigger": "Agent accesses sensitive data or external API",
+        "failure_mode": "No auth layer; all agents have equal access",
+        "cascade": (
+            "Compromised or buggy agent accesses all resources → "
+            "data leak or unauthorized action → no audit trail of who accessed what → "
+            "security incident with no forensics"
+        ),
+        "book_ref": {"chapter": 10, "page": "311", "section": "Agent Authentication & Authorization"},
+    },
+    # Level 5
+    "contract_net_marketplace": {
+        "trigger": "Task needs competitive bidding among agents",
+        "failure_mode": "Static task assignment, no dynamic allocation",
+        "cascade": (
+            "Best-suited agent overloaded while others idle → "
+            "suboptimal resource utilization → slow response times"
+        ),
+        "book_ref": {"chapter": 5, "page": "142", "section": "Contract-Net Marketplace"},
+    },
+    "supervision_tree_with_guarded_capabilities": {
+        "trigger": "Sub-agent crashes and needs restart with capability constraints",
+        "failure_mode": "Flat agent topology, no supervision hierarchy",
+        "cascade": (
+            "Agent crash propagates upward → no isolation boundary → "
+            "parent crash → cascade failure takes down entire system"
+        ),
+        "book_ref": {"chapter": 5, "page": "142", "section": "Supervision Tree"},
+    },
+    "agent_negotiation": {
+        "trigger": "Agents have conflicting goals or resource constraints",
+        "failure_mode": "No negotiation protocol; first-come-first-served",
+        "cascade": (
+            "Agents compete for shared resource → deadlock or starvation → "
+            "lower-priority but critical task never completes"
+        ),
+        "book_ref": {"chapter": 5, "page": "142", "section": "Agent Negotiation"},
+    },
+    "consensus_pattern": {
+        "trigger": "Multiple agents must agree on a shared decision",
+        "failure_mode": "Single agent decides unilaterally",
+        "cascade": (
+            "Single agent's bias or error goes unchecked → "
+            "no second opinion → wrong decision propagated as consensus"
+        ),
+        "book_ref": {"chapter": 5, "page": "142", "section": "Consensus Pattern"},
+    },
+    "blackboard_knowledge_hub": {
+        "trigger": "Agents need shared workspace for incremental problem-solving",
+        "failure_mode": "No shared data structure; agents pass messages only",
+        "cascade": (
+            "Intermediate results lost between agent turns → "
+            "agents repeat work → no incremental progress tracking"
+        ),
+        "book_ref": {"chapter": 5, "page": "142", "section": "Blackboard Knowledge Hub"},
+    },
+    # Level 6
+    "self_correction_pattern": {
+        "trigger": "Agent detects its own output quality degradation",
+        "failure_mode": "No self-monitoring or correction capability",
+        "cascade": (
+            "Quality drifts over time → no detection → "
+            "users notice degradation before system does → trust erodes"
+        ),
+        "book_ref": {"chapter": 9, "page": "309", "section": "Self-Correction"},
+    },
+    "self_improvement_flywheel": {
+        "trigger": "System should learn from past successes and failures",
+        "failure_mode": "No feedback loop; same mistakes repeated",
+        "cascade": (
+            "Recurring error pattern → no learning mechanism → "
+            "same failure hits in production repeatedly → manual patches each time"
+        ),
+        "book_ref": {"chapter": 11, "page": "367", "section": "Self-Improvement Flywheel"},
+    },
+    "custom_evaluation_metrics_pattern": {
+        "trigger": "Need domain-specific quality measurement",
+        "failure_mode": "Only generic metrics (latency, token count)",
+        "cascade": (
+            "Domain-critical quality issues missed by generic metrics → "
+            "system reports 'healthy' while output quality is poor → "
+            "silent degradation"
+        ),
+        "book_ref": {"chapter": 11, "page": "367", "section": "Custom Evaluation Metrics"},
+    },
+    "coevolved_agent_training_pattern": {
+        "trigger": "Agent ecosystem needs coordinated capability upgrades",
+        "failure_mode": "Agents updated independently without compatibility testing",
+        "cascade": (
+            "Agent A upgraded but Agent B expects old interface → "
+            "integration failure at runtime → cascading errors across agents"
+        ),
+        "book_ref": {"chapter": 14, "page": "497", "section": "Coevolved Agent Training"},
+    },
+    "majority_voting_pattern": {
+        "trigger": "Critical decision needs validation from multiple agents",
+        "failure_mode": "Single agent's output accepted without verification",
+        "cascade": (
+            "Agent produces incorrect result → no cross-validation → "
+            "error accepted as truth → wrong decision executed"
+        ),
+        "book_ref": {"chapter": 7, "page": "207", "section": "Majority Voting Across Agents"},
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _get_pattern_assessments(record: dict) -> dict[str, dict]:
+    """Extract pattern assessments from consultation steps, keyed by pattern_id."""
+    assessments = {}
+    for step in record.get("steps", []):
+        if step.get("type") == "pattern_assessment":
+            pid = step.get("pattern_id")
+            if pid:
+                assessments[pid] = step
+    return assessments
+
+
+def _get_all_model_pattern_ids() -> set[str]:
+    """All pattern IDs in MATURITY_MODEL."""
+    ids = set()
+    for patterns in MATURITY_MODEL.values():
+        for p in patterns:
+            ids.add(p["id"])
+    return ids
+
+
+def _get_pattern_level(pattern_id: str) -> int | None:
+    """Look up the maturity level for a pattern ID."""
+    for level, patterns in MATURITY_MODEL.items():
+        for p in patterns:
+            if p["id"] == pattern_id:
+                return level
+    return None
+
+
+def _find_dependent_patterns(
+    pattern_id: str,
+    assessments: dict[str, dict],
+) -> list[dict]:
+    """Find patterns that require the given pattern (via 'requires' edges).
+
+    Returns patterns that are implemented/partial but depend on a missing one.
+    """
+    dependents = []
+    try:
+        rels = get_concept_relationships(pattern_id, confidence_threshold=0.3)
+    except Exception:
+        return dependents
+
+    for rel in rels:
+        if rel["relationship_type"] != "requires":
+            continue
+        # requires edge: from requires to. If our pattern is the target (to),
+        # then from_concept_id depends on us.
+        if rel["to_concept_id"] == pattern_id:
+            dep_id = rel["from_concept_id"]
+            dep_assessment = assessments.get(dep_id)
+            if dep_assessment and dep_assessment.get("status") in ("implemented", "partial"):
+                dependents.append({
+                    "pattern_id": dep_id,
+                    "pattern_name": rel["from_name"],
+                    "status": dep_assessment["status"],
+                    "relationship": "requires",
+                })
+    return dependents
+
+
+def _build_cascade_steps(
+    pattern_id: str,
+    template: dict,
+    assessment: dict | None,
+) -> list[dict]:
+    """Build cascade steps for a failure scenario.
+
+    Uses code references from failure_context if available,
+    otherwise uses book-grounded template.
+    """
+    steps = []
+    step_num = 0
+
+    # Check for code-grounded evidence
+    failure_context = assessment.get("failure_context", {}) if assessment else {}
+    code_refs = failure_context.get("code_refs", [])
+
+    # Parse the cascade string into steps
+    cascade_parts = template["cascade"].split(" → ")
+
+    for i, part in enumerate(cascade_parts):
+        step_num += 1
+        step = {
+            "step": step_num,
+            "description": part.strip(),
+            "code_ref": None,
+            "outcome": "failure_propagates" if i < len(cascade_parts) - 1 else "system_impact",
+        }
+
+        # Attach code reference if available for this step
+        if i < len(code_refs):
+            ref = code_refs[i]
+            step["code_ref"] = f"{ref.get('file', '?')}:{ref.get('line', '?')}"
+            if ref.get("snippet"):
+                step["snippet"] = ref["snippet"]
+
+        steps.append(step)
+
+    return steps
+
+
+def _compute_severity(
+    pattern_id: str,
+    dependents: list[dict],
+    level: int | None,
+) -> str:
+    """Compute scenario severity based on dependencies and pattern importance."""
+    # Security/compliance patterns are always CRITICAL
+    if pattern_id in (
+        "instruction_fidelity_auditing_pattern",
+        "agent_authentication_and_authorization",
+    ):
+        return "CRITICAL"
+
+    # Patterns with implemented dependents (inverted pyramid) are CRITICAL
+    if dependents:
+        return "CRITICAL"
+
+    # L1 foundational patterns are CRITICAL
+    if level == 1:
+        return "CRITICAL"
+
+    # L2 patterns are WARNING
+    if level == 2:
+        return "WARNING"
+
+    return "INFO"
+
+
+def _build_failure_chain_coverage(
+    assessments: dict[str, dict],
+) -> dict:
+    """Map the Ch. 7 five-step failure chain against pattern assessments."""
+    chain_steps = []
+    implemented_count = 0
+
+    for link in FAILURE_CHAIN:
+        pid = link["pattern_id"]
+        assessment = assessments.get(pid)
+        status = assessment["status"] if assessment else "not_assessed"
+
+        is_covered = status in ("implemented", "partial")
+        if is_covered:
+            implemented_count += 1
+
+        chain_steps.append({
+            "step": link["step"],
+            "pattern_name": link["pattern_name"],
+            "pattern_id": pid,
+            "action": link["action"],
+            "recovery": link["recovery"],
+            "status": status,
+            "gap": not is_covered,
+            "chapter": link["chapter"],
+            "page": link["page"],
+        })
+
+    total = len(FAILURE_CHAIN)
+    coverage_pct = int((implemented_count / total) * 100) if total > 0 else 0
+
+    # Find first gap
+    first_gap = None
+    for s in chain_steps:
+        if s["gap"]:
+            first_gap = f"Step {s['step']}: {s['pattern_name']}"
+            break
+
+    return {
+        "steps": chain_steps,
+        "chain_coverage": f"{coverage_pct}%",
+        "implemented": implemented_count,
+        "total": total,
+        "first_gap": first_gap,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main tool
+# ---------------------------------------------------------------------------
+
+async def generate_failure_scenarios(
+    consultation_id: str,
+    max_scenarios: int = 5,
+) -> dict:
+    """Generate concrete failure scenario walkthroughs for missing/partial patterns.
+
+    Each scenario shows a realistic cascading failure: trigger event, step-by-step
+    propagation (with file:line references when code evidence is available), and
+    downstream impact. Also maps coverage against Ch. 7's five-step failure chain.
+
+    Deterministic — same consultation always produces the same scenarios.
+
+    Args:
+        consultation_id: The consultation session to analyze.
+        max_scenarios: Maximum number of scenarios to return (default: 5).
+    """
+    if not consultation_id or not consultation_id.strip():
+        return {"error": "consultation_id is required"}
+
+    record = get_consultation(consultation_id)
+    if not record:
+        return {"error": f"Consultation '{consultation_id}' not found"}
+
+    assessments = _get_pattern_assessments(record)
+    if not assessments:
+        return {
+            "error": "No pattern assessments found. Run graph traversal (step 3) "
+            "with log_pattern_assessment before generating failure scenarios.",
+            "consultation_id": consultation_id,
+        }
+
+    # Build scenarios for missing/partial patterns
+    scenarios = []
+
+    for level in sorted(MATURITY_MODEL.keys()):
+        for pattern in MATURITY_MODEL[level]:
+            pid = pattern["id"]
+            assessment = assessments.get(pid)
+            status = assessment["status"] if assessment else "not_assessed"
+
+            # Only build scenarios for missing/partial patterns
+            if status not in ("missing", "partial"):
+                continue
+
+            template = PATTERN_FAILURE_TEMPLATES.get(pid)
+            if not template:
+                continue
+
+            # Find implemented patterns that depend on this missing one
+            dependents = _find_dependent_patterns(pid, assessments)
+
+            # Determine mode
+            failure_context = assessment.get("failure_context", {}) if assessment else {}
+            has_code = bool(failure_context.get("code_refs"))
+            mode = "code_grounded" if has_code else "book_grounded"
+
+            # Build cascade steps
+            cascade_steps = _build_cascade_steps(pid, template, assessment)
+
+            # Severity
+            severity = _compute_severity(pid, dependents, level)
+
+            # Build the scenario
+            scenario = {
+                "scenario_id": len(scenarios) + 1,
+                "title": f"{'No ' if status == 'missing' else 'Weak '}{pattern['name']} → {template['trigger']}",
+                "trigger": template["trigger"],
+                "missing_pattern": {
+                    "id": pid,
+                    "name": pattern["name"],
+                    "status": status,
+                    "maturity_level": level,
+                    "chapter": pattern["chapter"],
+                },
+                "severity": severity,
+                "cascade_steps": cascade_steps,
+                "book_reference": template["book_ref"],
+                "mode": mode,
+            }
+
+            # Add recovery recommendation
+            metric = PATTERN_METRICS.get(pid)
+            if metric:
+                scenario["recovery"] = (
+                    f"Implement {pattern['name']} "
+                    f"(target: {metric['metric']}; {metric['source']})"
+                )
+            else:
+                scenario["recovery"] = (
+                    f"Implement {pattern['name']} "
+                    f"(Ch. {pattern['chapter']})"
+                )
+
+            # Add evidence from assessment
+            if assessment and assessment.get("evidence"):
+                scenario["evidence"] = assessment["evidence"]
+
+            # Add failure_context details if present
+            if failure_context.get("failure_mode"):
+                scenario["failure_mode_detail"] = failure_context["failure_mode"]
+
+            # Flag inverted pyramid: advanced pattern depends on this missing foundation
+            if dependents:
+                scenario["inverted_pyramid"] = {
+                    "warning": (
+                        f"{pattern['name']} (L{level}) is missing but these "
+                        f"higher-level patterns depend on it"
+                    ),
+                    "affected_patterns": dependents,
+                }
+
+            scenarios.append(scenario)
+
+    # Sort: CRITICAL first, then WARNING, then INFO; within same severity, lower level first
+    severity_order = {"CRITICAL": 0, "WARNING": 1, "INFO": 2}
+    scenarios.sort(key=lambda s: (
+        severity_order.get(s["severity"], 3),
+        s["missing_pattern"]["maturity_level"],
+    ))
+
+    # Truncate
+    scenarios = scenarios[:max_scenarios]
+
+    # Re-number after sort and truncate
+    for i, s in enumerate(scenarios):
+        s["scenario_id"] = i + 1
+
+    # Failure chain coverage
+    failure_chain = _build_failure_chain_coverage(assessments)
+
+    # Summary stats
+    missing_count = sum(
+        1 for a in assessments.values() if a.get("status") == "missing"
+    )
+    partial_count = sum(
+        1 for a in assessments.values() if a.get("status") == "partial"
+    )
+    inverted_count = sum(
+        1 for s in scenarios if "inverted_pyramid" in s
+    )
+
+    return {
+        "consultation_id": consultation_id,
+        "scenario_count": len(scenarios),
+        "scenarios": scenarios,
+        "failure_chain": failure_chain,
+        "summary": {
+            "total_missing": missing_count,
+            "total_partial": partial_count,
+            "scenarios_generated": len(scenarios),
+            "inverted_pyramid_warnings": inverted_count,
+            "chain_coverage": failure_chain["chain_coverage"],
+        },
+    }

@@ -25,6 +25,7 @@ src/iconsult_mcp/
     events.py              Event-driven reactivity (emit/poll events)
     plan_consultation.py   Adaptive consultation planning
     supervise_consultation.py  Workflow supervisor (progress + next action)
+    failure_scenarios.py       Stress test failure scenario generation
 
 tests/
   cases.py           Test case definitions (12 OpenAI agent examples)
@@ -36,6 +37,7 @@ tests/
   test_shared_state.py        Shared state CRUD
   test_events.py              Event emit/poll
   test_plan_consultation.py   Adaptive planning
+  test_failure_scenarios.py       Stress test failure scenario generation
   test_supervise_consultation.py  Supervisor progress
 
 scripts/
@@ -130,6 +132,7 @@ py scripts/run_pipeline.py --reset      # Clear everything and start over
 | `get_events` | **Event (poll)** | Poll consultation events with optional `since_id` and `event_type` filters |
 | `plan_consultation` | **Adaptive planning** | Assess complexity (simple/moderate/complex) from concept count, keywords, relationship density; generate adaptive step-by-step plan; logs `plan_created` step |
 | `supervise_consultation` | **Workflow supervisor** | Track workflow phases (completed/remaining), compute progress percent, suggest next action with tool + params, include event alerts and shared state |
+| `generate_failure_scenarios` | **Stress test** | Deterministic failure scenario walkthroughs for missing/partial patterns; cascading failure traces with code refs (code-grounded) or book templates (book-grounded); Ch. 7 five-step failure chain mapping; inverted pyramid detection |
 
 ### Reproducible Consultations
 
@@ -140,7 +143,7 @@ The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report`
 3. **Coverage gaps** — `consultation_report` computes what percentage of matched concepts were engaged (either traversed via `get_subgraph` or assessed via `log_pattern_assessment`), which relationship types were seen, and flags missing prerequisites/conflicts.
 4. **Cross-session comparison** — `consultation_report(id, compare_to=other_id)` diffs two sessions with the same fingerprint to show concept overlap, coverage deltas, and relationship type differences.
 5. **Canonical questions** — `ask_book` returns `suggested_questions` generated from graph edge templates (e.g., "What are the prerequisites for X and how does Y fulfill them?"), reducing question formulation variance.
-6. **Pattern assessments** — `log_pattern_assessment` records whether each pattern is implemented, partial, missing, or not_applicable in the user's codebase. Use `not_applicable` for patterns irrelevant to the architecture (e.g., Agent Calls Human for a batch pipeline). Call it during graph traversal (step 3) for every pattern identified.
+6. **Pattern assessments** — `log_pattern_assessment` records whether each pattern is implemented, partial, missing, or not_applicable in the user's codebase. Use `not_applicable` for patterns irrelevant to the architecture (e.g., Agent Calls Human for a batch pipeline). Call it during graph traversal (step 3) for every pattern identified. Optional `failure_context` captures structured code refs and failure modes for stress test demos.
 7. **Deterministic scoring** — `score_architecture` reads stored `pattern_assessment` steps and computes maturity level, phase-aligned pattern status with goals, and gap analysis using fixed formulas. N/A patterns don't block level progression. `roadmap_levels` (default 3) controls how many maturity levels the roadmap and Goal column cover. Each pattern gets a `phase` field (1-based) tying it to its implementation phase. No LLM involved in scoring — same assessments always produce same results.
 
 ### Consulting Workflow (6 steps)
@@ -150,9 +153,9 @@ The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report`
 2b. **PLAN** — `plan_consultation` to assess complexity and generate adaptive plan; optionally `supervise_consultation` after each step
 3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents; call `log_pattern_assessment` for each pattern; use `write_state`/`read_state` for subagent coordination; use `emit_event` for gap discovery
 4. **RETRIEVE PASSAGES** — `ask_book` scoped to discovered concepts with `consultation_id`; follow `suggested_questions`
-5. **CHECK COVERAGE + SCORE** — `consultation_report` to verify gaps; `score_architecture` for maturity scorecard with current status and goals
+5. **CHECK COVERAGE + SCORE + STRESS TEST** — `consultation_report` to verify gaps; `score_architecture` for maturity scorecard with current status and goals; `generate_failure_scenarios` for concrete failure walkthroughs
 5b. **CRITIQUE (optional)** — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address gaps; cap at 1 iteration
-6. **SYNTHESIZE** — Render entire consultation as a single HTML page via `/generate-web-diagram`. HTML sections in order: (a) Executive Brief callout for decision makers, (b) Maturity banner (current → target), (c) System Under Review with agent roster, (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail + book ref), (e) Before/After Mermaid diagrams (red gaps / green additions), (f) Implementation Recommendation cards by phase with code snippets + citations, (g) Failure Recovery Chain. Also check prerequisite/conflict edges; comparison tables as HTML when 4+ rows
+6. **SYNTHESIZE** — Render entire consultation as a single HTML page via `/generate-web-diagram`. HTML sections in order: (a) Executive Brief callout for decision makers, (b) Maturity banner (current → target), (c) System Under Review with agent roster, (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail + book ref), (e) Before/After Mermaid diagrams (red gaps / green additions), (f) Implementation Recommendation cards by phase with code snippets + citations, (g) Failure Recovery Chain, (h) Stress Test: Failure Scenarios (collapsible cascading failure traces, Ch. 7 chain coverage, inverted pyramid warnings). Also check prerequisite/conflict edges; comparison tables as HTML when 4+ rows
 
 ## Testing
 
@@ -222,6 +225,7 @@ All parameterized tests automatically pick up new cases. To find valid concept I
 | `test_shared_state.py` | Write/read/upsert state, validation, nonexistent key/consultation |
 | `test_events.py` | Emit/poll events, since_id filter, event_type filter, suggestions, validation |
 | `test_plan_consultation.py` | Simple/moderate/complex plans, step logging, complexity assessment |
+| `test_failure_scenarios.py` | Scenario structure, determinism, empty case, code evidence, failure chain, severity ordering, max cap |
 | `test_supervise_consultation.py` | Empty/partial/complete progress, event alerts, shared state |
 
 ## Resilience

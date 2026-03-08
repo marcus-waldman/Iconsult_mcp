@@ -74,6 +74,12 @@ CASES: list[dict] = [
                 "status": "missing",
                 "evidence": "no timeout handling found",
                 "maturity_level": 1,
+                "failure_context": {
+                    "code_refs": [
+                        {"file": "manager.py", "line": 45, "snippet": "result = await agent.run(task)"},
+                    ],
+                    "failure_mode": "Agent hangs indefinitely on external API call, no timeout protection",
+                },
             },
             {
                 "pattern_id": "agent_calls_human_pattern",
@@ -81,6 +87,19 @@ CASES: list[dict] = [
                 "status": "missing",
                 "evidence": "fully autonomous, no human escalation",
                 "maturity_level": 1,
+            },
+            {
+                "pattern_id": "adaptive_retry_pattern",
+                "pattern_name": "Simple Retry",
+                "status": "missing",
+                "evidence": "no retry logic in API calls",
+                "maturity_level": 2,
+                "failure_context": {
+                    "code_refs": [
+                        {"file": "agents/analyst.py", "line": 78, "snippet": "resp = web_search(query)"},
+                    ],
+                    "failure_mode": "Single API failure crashes the pipeline, no retry",
+                },
             },
         ],
     },

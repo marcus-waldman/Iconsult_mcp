@@ -19,6 +19,7 @@ WORKFLOW_PHASES = [
     {"phase": "retrieve", "step_types": ["book_query"], "label": "Retrieve Passages"},
     {"phase": "coverage", "step_types": ["coverage_check"], "label": "Check Coverage"},
     {"phase": "score", "step_types": ["score"], "label": "Score Architecture"},
+    {"phase": "failure_scenarios", "step_types": ["failure_scenarios"], "label": "Generate Failure Scenarios"},
     {"phase": "critique", "step_types": ["critique"], "label": "Critique Consultation"},
     {"phase": "synthesize", "step_types": ["synthesis"], "label": "Synthesize Report"},
 ]
@@ -145,12 +146,20 @@ def _determine_next_action(record: dict, progress: dict) -> dict:
             "reason": "Coverage checked. Compute maturity scorecard.",
         }
 
+    if current == "failure_scenarios":
+        return {
+            "action": "failure_scenarios",
+            "tool": "generate_failure_scenarios",
+            "params": {"consultation_id": cid},
+            "reason": "Scored. Generate failure scenario walkthroughs for gaps.",
+        }
+
     if current == "critique":
         return {
             "action": "critique",
             "tool": "critique_consultation",
             "params": {"consultation_id": cid},
-            "reason": "Scored. Run quality critique to find remaining gaps.",
+            "reason": "Failure scenarios generated. Run quality critique to find remaining gaps.",
         }
 
     if current == "synthesize":

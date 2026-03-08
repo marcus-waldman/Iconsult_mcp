@@ -140,6 +140,15 @@ def _generate_plan(
         step_num += 1
         steps.append({
             "step_number": step_num,
+            "action": "failure_scenarios",
+            "tool": "generate_failure_scenarios",
+            "params": {"max_scenarios": 3},
+            "description": "Generate failure scenario walkthroughs for gaps",
+        })
+
+        step_num += 1
+        steps.append({
+            "step_number": step_num,
             "action": "synthesize",
             "tool": "generate-web-diagram",
             "params": {},
@@ -202,6 +211,15 @@ def _generate_plan(
             "tool": "score_architecture",
             "params": {},
             "description": "Compute maturity scorecard",
+        })
+
+        step_num += 1
+        steps.append({
+            "step_number": step_num,
+            "action": "failure_scenarios",
+            "tool": "generate_failure_scenarios",
+            "params": {},
+            "description": "Generate failure scenario walkthroughs for gaps",
         })
 
         step_num += 1
@@ -291,6 +309,15 @@ def _generate_plan(
             "tool": "score_architecture",
             "params": {},
             "description": "Compute maturity scorecard",
+        })
+
+        step_num += 1
+        steps.append({
+            "step_number": step_num,
+            "action": "failure_scenarios",
+            "tool": "generate_failure_scenarios",
+            "params": {},
+            "description": "Generate failure scenario walkthroughs for gaps",
         })
 
         step_num += 1

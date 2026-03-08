@@ -8,7 +8,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
-- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`
+- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`
 - L4 modules: `access_policy.py` (tool access levels + consultation ownership validation)
 - Resilience: `escalation.py` (structured error responses), dispatch dict + timeout/retry in `server.py`
 - Developer docs: `docs/development.md`
@@ -25,7 +25,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - Integration tests in `tests/` — require MOTHERDUCK_TOKEN and OPENAI_API_KEY env vars
 - Test cases in `tests/cases.py` — 12 architectures derived from openai/openai-agents-python examples
 - Adding a test case = adding a dict to `CASES` in `tests/cases.py` (id, description, expected_concepts, pattern_assessments)
-- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_consultation_flow.py` (end-to-end)
+- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_consultation_flow.py` (end-to-end)
 
 ## Environment Variables
 - `MOTHERDUCK_TOKEN` — required for database
@@ -49,7 +49,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `get_subgraph(concept_ids, max_hops=2, confidence_threshold=0.5, max_edges=50, include_descriptions?, consultation_id?)` — QUERY PLANNER: priority-queue traversal; logs steps when `consultation_id` provided
 - `ask_book(question, concept_ids?, max_passages?, consultation_id?)` — DEEP CONTEXT: RAG search; returns `suggested_questions` from graph edges; logs steps when `consultation_id` provided
 - `consultation_report(consultation_id, compare_to?)` — COVERAGE CHECK: concept coverage (matched concepts that were traversed OR assessed), relationship type coverage, passage diversity, gap identification, cross-session diff
-- `log_pattern_assessment(consultation_id, pattern_id, pattern_name, status, evidence?, maturity_level?)` — LOG ASSESSMENT: record a pattern assessment during graph traversal; status is "implemented", "partial", "missing", or "not_applicable" (pattern irrelevant to this architecture); these feed into `score_architecture`
+- `log_pattern_assessment(consultation_id, pattern_id, pattern_name, status, evidence?, maturity_level?, failure_context?)` — LOG ASSESSMENT: record a pattern assessment during graph traversal; status is "implemented", "partial", "missing", or "not_applicable" (pattern irrelevant to this architecture); optional `failure_context` (dict with `code_refs`, `failure_mode`, `depends_on`) captures structured evidence for stress test demos; these feed into `score_architecture` and `generate_failure_scenarios`
 - `score_architecture(consultation_id, target_level?, roadmap_levels?)` — MATURITY SCORECARD: deterministic scoring from stored `pattern_assessment` steps; computes maturity level (L1-L6), pattern status with phase-aligned goals, gap analysis with severity, recommended metrics, implementation roadmap. `roadmap_levels` (default 3) controls how many levels the roadmap/goals cover. Each pattern gets a `phase` field (1-based) tying it to its implementation phase.
 - `validate_subagent(response)` — VALIDATE: schema validation for subagent JSON responses {concept, key_relationships, recommendation, discovered_ids}; pure structural checks, no LLM
 - `critique_consultation(consultation_id)` — CRITIQUE: deterministic quality critique of consultation steps; checks workflow completeness, traversal depth, assessment coverage, passage diversity, critical edges; returns issues with severity + `prompt_mutations` for adaptive retry
@@ -59,6 +59,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `get_events(consultation_id, since_id?, event_type?)` — EVENT (poll): poll events with optional filters
 - `plan_consultation(consultation_id)` — PLAN: assess complexity (simple/moderate/complex) and generate adaptive step-by-step plan after match_concepts
 - `supervise_consultation(consultation_id)` — SUPERVISE: track workflow progress (phases completed/remaining, percent), suggest next action with tool + params, include event alerts and shared state
+- `generate_failure_scenarios(consultation_id, max_scenarios?)` — STRESS TEST: deterministic failure scenario walkthroughs for missing/partial patterns; each scenario shows cascading failure (trigger → propagation steps with file:line refs when code available → impact); maps Ch. 7 five-step failure chain; flags inverted pyramid warnings when advanced patterns depend on missing foundations; two modes: code-grounded (from `failure_context.code_refs`) or book-grounded (from pattern failure templates)
 
 ### Prompt
 - `consult(context)` — guided architecture consultation; interpolates user's project context into the full 6-step workflow
@@ -69,9 +70,9 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 2b. PLAN — `plan_consultation` to assess complexity and generate adaptive plan; optionally `supervise_consultation` after each step
 3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `consultation_id`; call `log_pattern_assessment` for each pattern found/missing/not_applicable; use `write_state`/`read_state` for subagent coordination; use `emit_event` for gap discovery
 4. RETRIEVE PASSAGES — `ask_book` scoped to discovered concept IDs with `consultation_id`; use `suggested_questions` for follow-ups
-5. CHECK COVERAGE + SCORE — `consultation_report` to verify coverage; `score_architecture` to get maturity scorecard with current status and goals
+5. CHECK COVERAGE + SCORE + STRESS TEST — `consultation_report` to verify coverage; `score_architecture` to get maturity scorecard with current status and goals; `generate_failure_scenarios` to produce concrete failure walkthroughs for gaps
 5b. CRITIQUE (optional) — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address gaps; cap at 1 iteration
-6. SYNTHESIZE — render entire consultation as a single HTML page via `/generate-web-diagram` skill (ASCII only for <5 nodes). HTML must include in order: (a) Executive Brief callout (3-4 sentences for decision makers), (b) Maturity banner (current → target level), (c) System Under Review (architecture, agent roster with tools), (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail: how implemented / what's missing and why it matters + book ref), (e) Before/After Mermaid diagrams (red gaps / green additions), (f) Implementation Recommendations cards by phase with code snippets + citations, (g) Failure Recovery Chain. Also check prerequisite/conflict edges; render comparison tables as HTML when 4+ rows
+6. SYNTHESIZE — render entire consultation as a single HTML page via `/generate-web-diagram` skill (ASCII only for <5 nodes). HTML must include in order: (a) Executive Brief callout (3-4 sentences for decision makers), (b) Maturity banner (current → target level), (c) System Under Review (architecture, agent roster with tools), (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail: how implemented / what's missing and why it matters + book ref), (e) Before/After Mermaid diagrams (red gaps / green additions), (f) Implementation Recommendations cards by phase with code snippets + citations, (g) Failure Recovery Chain, (h) Stress Test: Failure Scenarios (collapsible cascading failure traces with code refs, book citations, inverted pyramid warnings, Ch. 7 failure chain coverage). Also check prerequisite/conflict edges; render comparison tables as HTML when 4+ rows
 
 ## Literature
 - Book markdown: `literature/Arsanjani and Bustos - 2026 - ....md`

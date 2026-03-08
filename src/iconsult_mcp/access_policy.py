@@ -30,6 +30,7 @@ TOOL_ACCESS = {
     "get_events": "read",
     "plan_consultation": "write",
     "supervise_consultation": "read",
+    "generate_failure_scenarios": "read",
 }
 
 

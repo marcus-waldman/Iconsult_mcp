@@ -73,6 +73,9 @@ async def critique_consultation(consultation_id: str) -> dict:
     # Check critical edges
     _check_critical_edges(stats, issues)
 
+    # Check failure scenarios
+    _check_failure_scenarios(stats, issues)
+
     severity_counts = {}
     for issue in issues:
         sev = issue["severity"]
@@ -257,6 +260,24 @@ def _check_critical_edges(stats: dict, issues: list[dict]) -> None:
         })
 
 
+def _check_failure_scenarios(stats: dict, issues: list[dict]) -> None:
+    """Check that failure scenarios were generated when missing patterns exist."""
+    has_missing = stats.get("assessment_statuses", {}).get("missing", 0) > 0
+    has_partial = stats.get("assessment_statuses", {}).get("partial", 0) > 0
+    has_scenarios = "failure_scenarios" in stats.get("step_types_present", [])
+
+    if (has_missing or has_partial) and not has_scenarios:
+        issues.append({
+            "severity": "warning",
+            "category": "failure_scenarios",
+            "message": (
+                "Missing/partial patterns found but no failure scenarios generated. "
+                "Call generate_failure_scenarios to demonstrate the impact of gaps."
+            ),
+            "suggestion": "Call generate_failure_scenarios with the consultation_id.",
+        })
+
+
 def _build_prompt_mutations(issues: list[dict], stats: dict) -> list[dict]:
     """Generate concrete prompt mutations from critique issues.
 
@@ -311,6 +332,19 @@ def _build_prompt_mutations(issues: list[dict], stats: dict) -> list[dict]:
             "action": "ask_book",
             "params": {"question": "What are the key architectural patterns for this system?"},
             "reason": "No book passages retrieved — ground recommendations in book citations.",
+        })
+
+    # Missing/partial patterns but no failure scenarios → suggest generation
+    has_gaps = (
+        stats.get("assessment_statuses", {}).get("missing", 0) > 0
+        or stats.get("assessment_statuses", {}).get("partial", 0) > 0
+    )
+    has_scenarios = "failure_scenarios" in stats.get("step_types_present", [])
+    if has_gaps and not has_scenarios:
+        mutations.append({
+            "action": "generate_failure_scenarios",
+            "params": {},
+            "reason": "Missing/partial patterns found — generate failure scenarios to demonstrate impact.",
         })
 
     return mutations[:5]

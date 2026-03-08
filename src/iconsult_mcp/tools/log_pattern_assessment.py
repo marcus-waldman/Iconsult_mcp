@@ -12,6 +12,7 @@ async def log_pattern_assessment(
     status: str,
     evidence: str = "",
     maturity_level: int = 1,
+    failure_context: dict | None = None,
 ) -> dict:
     """Log a pattern assessment to a consultation's step log.
 
@@ -19,9 +20,12 @@ async def log_pattern_assessment(
         consultation_id: The consultation session ID from match_concepts.
         pattern_id: The concept ID of the pattern being assessed.
         pattern_name: Human-readable name of the pattern.
-        status: One of "implemented", "partial", or "missing".
+        status: One of "implemented", "partial", "missing", or "not_applicable".
         evidence: File path or description of what was found.
         maturity_level: Assessed maturity level (1-6).
+        failure_context: Optional structured failure context for stress test demos.
+            Fields: code_refs (list of {file, line, snippet}),
+            failure_mode (str), depends_on (list of pattern_ids).
     """
     if not consultation_id or not consultation_id.strip():
         return {"error": "consultation_id is required"}
@@ -34,13 +38,18 @@ async def log_pattern_assessment(
 
     maturity_level = max(1, min(6, maturity_level))
 
-    log_consultation_step(consultation_id, "pattern_assessment", {
+    step_data = {
         "pattern_id": pattern_id,
         "pattern_name": pattern_name,
         "status": status,
         "evidence": evidence,
         "maturity_level": maturity_level,
-    })
+    }
+
+    if failure_context and isinstance(failure_context, dict):
+        step_data["failure_context"] = failure_context
+
+    log_consultation_step(consultation_id, "pattern_assessment", step_data)
 
     return {
         "logged": True,

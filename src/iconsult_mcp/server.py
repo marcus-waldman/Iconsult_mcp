@@ -34,6 +34,7 @@ from iconsult_mcp.tools.shared_state import write_state, read_state
 from iconsult_mcp.tools.events import emit_event, get_events
 from iconsult_mcp.tools.plan_consultation import plan_consultation
 from iconsult_mcp.tools.supervise_consultation import supervise_consultation
+from iconsult_mcp.tools.failure_scenarios import generate_failure_scenarios
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ TOOL_METADATA = {
     "get_events": {"timeout": 10, "retryable": False, "category": "coordination", "access_level": "read"},
     "plan_consultation": {"timeout": 15, "retryable": False, "category": "consultation", "access_level": "write"},
     "supervise_consultation": {"timeout": 10, "retryable": False, "category": "consultation", "access_level": "read"},
+    "generate_failure_scenarios": {"timeout": 15, "retryable": False, "category": "consultation", "access_level": "read"},
 }
 
 # Dispatch table: tool name → handler(arguments) → coroutine
@@ -100,6 +102,7 @@ TOOL_DISPATCH = {
         status=args.get("status", ""),
         evidence=args.get("evidence", ""),
         maturity_level=args.get("maturity_level", 1),
+        failure_context=args.get("failure_context"),
     ),
     "validate_subagent": lambda args: validate_subagent(
         response=args.get("response", {}),
@@ -131,6 +134,10 @@ TOOL_DISPATCH = {
     ),
     "supervise_consultation": lambda args: supervise_consultation(
         consultation_id=args.get("consultation_id", ""),
+    ),
+    "generate_failure_scenarios": lambda args: generate_failure_scenarios(
+        consultation_id=args.get("consultation_id", ""),
+        max_scenarios=args.get("max_scenarios", 5),
     ),
 }
 
@@ -192,6 +199,12 @@ pipeline, or Consensus for a single-supervisor system). Assess as many patterns 
 can identify from the user's code. These stored assessments are what `score_architecture` \
 uses to compute deterministic scores.
 
+   **Capture failure context:** When logging missing or partial patterns, include \
+`failure_context` with code references (file:line:snippet for code-grounded consultations) \
+and dependency information from `requires` edges. For missing patterns, note what would \
+fail — e.g., `{"code_refs": [{"file": "payment.py", "line": 45, "snippet": "resp = \
+api.call()"}], "failure_mode": "No retry logic, API failures propagate to orchestrator"}`.
+
    Then narrate in 1-2 sentences: the single most significant finding — a missing \
 prerequisite, a conflict, or an alternative worth considering.
 
@@ -213,7 +226,10 @@ check coverage gaps before synthesizing. Concept coverage counts matched concept
 were either traversed (get_subgraph) or assessed (log_pattern_assessment). If concept \
 coverage or relationship type coverage is low, go back and explore unexplored concepts \
 or log more pattern assessments. \
-Call `score_architecture` to get the maturity scorecard with current status and goals.
+Call `score_architecture` to get the maturity scorecard with current status and goals. \
+Call `generate_failure_scenarios` to produce concrete failure walkthroughs for each gap. \
+These demonstrate what breaks when patterns are missing, using actual code paths \
+(code-grounded mode) or book failure scenarios (book-grounded mode).
 
 5b. **CRITIQUE (optional)** — Call `critique_consultation` to get a deterministic quality \
 critique of the consultation so far. If errors are found (missing workflow steps, no \
@@ -254,6 +270,14 @@ card includes: priority badge, description grounded in the user's specific files
 snippets where applicable, file references, and book citations with chapter and page.
 
    **g. Failure Recovery Chain** — The recommended failure chain from Ch. 7.
+
+   **h. Stress Test: Failure Scenarios** — For each CRITICAL/WARNING gap from \
+`generate_failure_scenarios`, show a step-by-step failure cascade trace. Each trace \
+has: trigger event, propagation steps (with file:line references when available), \
+downstream impact, book reference, and the recovery pattern recommendation. Include \
+the failure chain coverage diagram showing which of the 5 Ch. 7 recovery steps are \
+implemented vs. missing. Flag inverted pyramid warnings where advanced patterns depend \
+on missing foundations. Use collapsible `<details>/<summary>` elements for each scenario.
 
    Additional requirements:
    - Check `requires` edges — flag missing prerequisites
@@ -515,6 +539,15 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "Assessed maturity level (1-6, default: 1)",
                     },
+                    "failure_context": {
+                        "type": "object",
+                        "description": (
+                            "Optional structured failure context for stress test demos. "
+                            "Fields: code_refs (list of {file, line, snippet}), "
+                            "failure_mode (string describing what breaks), "
+                            "depends_on (list of pattern_ids this depends on)"
+                        ),
+                    },
                 },
                 "required": ["consultation_id", "pattern_id", "pattern_name", "status"],
             },
@@ -704,6 +737,34 @@ async def list_tools() -> list[Tool]:
                 "required": ["consultation_id"],
             },
         ),
+        Tool(
+            name="generate_failure_scenarios",
+            description=(
+                "STRESS TEST — Generate concrete failure scenario walkthroughs for "
+                "missing/partial patterns. Each scenario shows a realistic cascading "
+                "failure: trigger event, step-by-step propagation through the architecture "
+                "(with file:line references when code evidence is available), downstream "
+                "impact, and book-cited recovery recommendation. Also maps coverage against "
+                "Ch. 7's five-step failure recovery chain. Flags inverted pyramid warnings "
+                "when advanced patterns depend on missing foundations. Deterministic — same "
+                "consultation always produces same scenarios. Requires pattern_assessment "
+                "steps from step 3."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session to analyze",
+                    },
+                    "max_scenarios": {
+                        "type": "integer",
+                        "description": "Maximum scenarios to return (1-20, default: 5)",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
     ]
 
 
@@ -824,7 +885,9 @@ me in 1-2 sentences the key insight the book provides.
 
 5. **Check coverage and score** — Call `consultation_report` with the `consultation_id` \
 to check coverage gaps. Then call `score_architecture` to get the maturity scorecard \
-with current status and goals. If coverage is low, go back and explore the gaps.
+with current status and goals. If coverage is low, go back and explore the gaps. \
+Then call `generate_failure_scenarios` to produce concrete failure walkthroughs for \
+each gap — these show cascading failures with code references or book scenarios.
 
 6. **Synthesize recommendations** — Render the entire consultation as a **single \
 self-contained HTML page** using `/generate-web-diagram` (opens in browser). \
@@ -844,6 +907,10 @@ gaps on left, green for additions on right.
    f. **Implementation Recommendations** — Cards grouped by phase with priority badges, \
 code snippets, file refs, book citations.
    g. **Failure Recovery Chain** from Ch. 7.
+   h. **Stress Test: Failure Scenarios** — Collapsible failure cascade traces for each \
+CRITICAL/WARNING gap. Each trace: trigger, propagation steps with file:line refs, \
+impact, book citation, recovery recommendation. Include Ch. 7 failure chain coverage \
+diagram and inverted pyramid warnings.
    - Prerequisites check (requires edges) and conflict warnings (conflicts_with edges)
    - Comparison of alternatives rendered as HTML table when 4+ rows or 3+ columns""",
                 ),
