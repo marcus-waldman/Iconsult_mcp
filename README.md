@@ -1,8 +1,8 @@
-# Iconsult MCP: "I make my living as an AI consultant"
+# Iconsult MCP
 
-**Finally, an AI consultant that actually read the book.**
+**Architecture consulting for multi-agent systems, grounded in the textbook.**
 
-While other "AI consultants" are busy rephrasing your requirements back to you at $400/hour, Iconsult has ingested an entire textbook on multi-agent architecture, built a knowledge graph of 141 concepts and 462 relationships, and will give you evidence-backed pattern recommendations in under a second. No slide deck. No "circle back." No invoice.
+Iconsult is an MCP server that reviews your multi-agent architecture against a knowledge graph of 141 concepts and 462 relationships extracted from *Agentic Architectural Patterns for Building Multi-Agent Systems* (Arsanjani & Bustos, Packt 2026). Every recommendation comes with chapter numbers, page references, and concrete code-level changes — not abstract advice.
 
 ## See It In Action
 
@@ -81,13 +81,13 @@ The consultation followed Iconsult's guided workflow:
 
 4. **Retrieve book passages** — `ask_book` scoped to the discovered concepts returned exact citations: chapter numbers, page ranges, and quotes grounding each recommendation.
 
-5. **Score + synthesize** — `score_architecture` computed the maturity scorecard from logged assessments. Then generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
+5. **Score + stress test + synthesize** — `score_architecture` computed the maturity scorecard from logged assessments. `generate_failure_scenarios` produced concrete cascading failure traces for each gap — showing exactly what breaks and how failures propagate. Then generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
 
 ## What It Does
 
-Iconsult is an MCP server that acts as a technical architecture advisor for multi-agent systems. It's backed by a knowledge graph extracted from *Agentic Architectural Patterns for Building Multi-Agent Systems* (Arsanjani & Bustos, Packt 2026) — meaning every recommendation comes with page numbers, not vibes.
+Point it at a codebase (or describe your architecture), and it runs a structured consultation: matching concepts, traversing the knowledge graph for prerequisites and conflicts, scoring maturity against a 6-level model, and generating an interactive HTML review with before/after architecture diagrams.
 
-### Tools (16)
+### Tools (17)
 
 **Consultation workflow:**
 
@@ -100,6 +100,7 @@ Iconsult is an MCP server that acts as a technical architecture advisor for mult
 | `ask_book` | Deep context | RAG search against the book — returns passages with chapter, page numbers, and full text |
 | `consultation_report` | Coverage | Computes concept/relationship coverage, identifies gaps, optionally diffs two sessions |
 | `score_architecture` | Scoring | Deterministic maturity scorecard (L1–L6) from logged pattern assessments |
+| `generate_failure_scenarios` | Stress test | Cascading failure traces for each gap — code-grounded or book-grounded, with Ch. 7 recovery chain mapping |
 | `critique_consultation` | Quality | Structural critique of consultation completeness with actionable fix suggestions |
 | `supervise_consultation` | Supervision | Tracks workflow progress across 9 phases, suggests next action with tool + params |
 
