@@ -85,12 +85,15 @@ step 3, passing `consultation_id` for logging. Use `suggested_questions` from th
 response to ask deterministic follow-up questions derived from graph edges. \
 Then narrate in 1-2 sentences: the key insight the book provides.
 
-5. **CHECK COVERAGE** — Call `consultation_report` with the `consultation_id` to \
+5. **CHECK COVERAGE + SCORE** — Call `consultation_report` with the `consultation_id` to \
 check coverage gaps before synthesizing. If concept coverage or relationship type \
 coverage is low, go back and explore unexplored concepts or missing edge types. \
-Optionally call `score_architecture` to compute the maturity scorecard.
+Call `score_architecture` to get the maturity scorecard with current status and goals.
 
 6. **SYNTHESIZE** — Deliver project-specific recommendations:
+   - Present the maturity scorecard FIRST, before architecture diagrams. The scorecard \
+must include a Status column (implemented/partial/missing) and a Goal column (target \
+status after recommendations). Then render before/after architecture diagrams.
    - Ground every recommendation in the user's specific files and code
    - Render before/after architecture diagrams using the `/generate-web-diagram` skill \
 (writes a self-contained HTML file with Mermaid; opens in browser). Only fall back to \
@@ -285,11 +288,11 @@ async def list_tools() -> list[Tool]:
             description=(
                 "MATURITY SCORECARD — Deterministic architecture scoring from stored pattern "
                 "assessments. Reads pattern_assessment steps logged during graph traversal and "
-                "computes: maturity level (L1-L6), per-dimension radar scores (Robustness, "
-                "Coordination, Compliance, User Interaction, Agent Capabilities), gap analysis "
-                "with severity, recommended metrics from the book, and implementation roadmap. "
-                "Same consultation always produces same scores. Requires pattern_assessment "
-                "steps to have been logged during step 3 (traverse graph)."
+                "computes: maturity level (L1-L6), pattern status with goals (target status "
+                "after recommendations), gap analysis with severity, recommended metrics from "
+                "the book, and implementation roadmap. Same consultation always produces same "
+                "results. Requires pattern_assessment steps to have been logged during step 3 "
+                "(traverse graph)."
             ),
             inputSchema={
                 "type": "object",
@@ -490,10 +493,11 @@ to ask deterministic follow-up questions. Cite chapter and page numbers. Then te
 me in 1-2 sentences the key insight the book provides.
 
 5. **Check coverage and score** — Call `consultation_report` with the `consultation_id` \
-to check coverage gaps. Then call `score_architecture` to compute the maturity scorecard \
-with deterministic scores. If coverage is low, go back and explore the gaps.
+to check coverage gaps. Then call `score_architecture` to get the maturity scorecard \
+with current status and goals. If coverage is low, go back and explore the gaps.
 
 6. **Synthesize recommendations** — Deliver:
+   - The maturity scorecard FIRST, with Status and Goal columns, before architecture diagrams.
    - Before/after architecture diagrams rendered with `/generate-web-diagram` (HTML + \
 Mermaid, opens in browser). Use ASCII only for trivial diagrams with fewer than ~5 nodes.
    - Specific file-level changes mapped to my codebase

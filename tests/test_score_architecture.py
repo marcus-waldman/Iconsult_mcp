@@ -41,17 +41,17 @@ async def test_score_produces_valid_output(case, consultation_cleanup):
     assert "current_level" in score["maturity"]
     assert 0 <= score["maturity"]["current_level"] <= 6
 
-    assert "overall_score" in score
-    assert 0 <= score["overall_score"] <= 100
-
-    assert "dimension_scores" in score
-    for dim in ["Robustness", "Coordination", "Compliance", "User Interaction", "Agent Capabilities"]:
-        assert dim in score["dimension_scores"], f"Missing dimension: {dim}"
-        assert "score" in score["dimension_scores"][dim]
+    assert "overall_score" not in score
+    assert "dimension_scores" not in score
 
     assert "pattern_coverage" in score
     assert "gap_analysis" in score
     assert "roadmap" in score
+
+    # Every pattern in coverage details must have a goal field
+    for detail in score["pattern_coverage"]["details"]:
+        assert "goal" in detail, f"Missing goal for {detail['pattern_id']}"
+        assert detail["goal"] in ("implemented", "partial", "missing")
 
 
 @pytest.mark.asyncio
@@ -70,11 +70,8 @@ async def test_score_determinism(consultation_cleanup):
         score = await score_architecture(cid)
         scores.append(score)
 
-    assert scores[0]["overall_score"] == scores[1]["overall_score"]
     assert scores[0]["maturity"]["current_level"] == scores[1]["maturity"]["current_level"]
-
-    for dim in scores[0]["dimension_scores"]:
-        assert scores[0]["dimension_scores"][dim]["score"] == scores[1]["dimension_scores"][dim]["score"]
+    assert scores[0]["pattern_coverage"] == scores[1]["pattern_coverage"]
 
 
 @pytest.mark.asyncio

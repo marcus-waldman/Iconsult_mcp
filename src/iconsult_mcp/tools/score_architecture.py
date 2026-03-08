@@ -56,60 +56,6 @@ MATURITY_MODEL: dict[int, list[dict]] = {
     ],
 }
 
-# Dimensions for radar chart scoring. Each dimension groups related patterns.
-DIMENSION_MAP: dict[str, list[str]] = {
-    "Robustness": [
-        "adaptive_retry_pattern",
-        "adaptive_retry_with_prompt_mutation",
-        "watchdog_timeout_pattern",
-        "auto_healing_pattern",
-        "trust_decay_pattern",
-        "fallback_model_invocation_pattern",
-        "majority_voting_pattern",
-        "canary_agent_testing_pattern",
-        "rate_limited_invocation",
-        "circuit_breaker_pattern",
-    ],
-    "Coordination": [
-        "supervisor_architecture",
-        "multi_agent_planning",
-        "knowledge_sharing_pattern",
-        "consensus_pattern",
-        "negotiation_pattern",
-        "conflict_resolution",
-        "tool_routing_pattern",
-        "formation_control_pattern",
-        "contract_net_marketplace",
-        "swarm_architecture",
-        "agent_router_pattern",
-    ],
-    "Compliance": [
-        "instruction_fidelity_auditing_pattern",
-        "audit_trail_pattern",
-        "observability_pattern",
-        "agent_authentication_and_authorization",
-        "fractal_chain_of_thought_fcot",
-        "causal_dependency_graph_pattern",
-        "execution_envelope_isolation",
-    ],
-    "User Interaction": [
-        "agent_calls_human_pattern",
-        "human_delegates_to_agent",
-        "human_calls_agent_pattern",
-        "agent_delegates_to_agent_pattern",
-        "agent_calls_proxy_agent_pattern",
-        "human_in_the_loop_hitl_pattern",
-    ],
-    "Agent Capabilities": [
-        "single_agent_baseline_pattern",
-        "agent_specific_context_and_memory",
-        "structured_reasoning_and_self",
-        "multimodal_sensory_input_pattern",
-        "function_calling_pattern",
-        "tool_use_pattern",
-    ],
-}
-
 # Per-pattern recommended metrics from Ch. 7 (Table 7.2), Ch. 8 (Table 8.2),
 # Ch. 9 (Table 9.3). Only patterns with book-defined metrics are included.
 PATTERN_METRICS: dict[str, dict] = {
@@ -198,10 +144,6 @@ PATTERN_METRICS: dict[str, dict] = {
     },
 }
 
-# Status weights for scoring formula
-STATUS_WEIGHTS = {"implemented": 1.0, "partial": 0.5, "missing": 0.0}
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -218,49 +160,12 @@ def _get_pattern_assessments(record: dict) -> dict[str, dict]:
 
 
 def _all_pattern_ids() -> set[str]:
-    """All unique pattern IDs referenced in MATURITY_MODEL and DIMENSION_MAP."""
+    """All unique pattern IDs referenced in MATURITY_MODEL."""
     ids = set()
     for patterns in MATURITY_MODEL.values():
         for p in patterns:
             ids.add(p["id"])
-    for patterns in DIMENSION_MAP.values():
-        for pid in patterns:
-            ids.add(pid)
     return ids
-
-
-def _compute_dimension_scores(assessments: dict[str, dict]) -> dict[str, dict]:
-    """Compute per-dimension scores from assessments."""
-    results = {}
-    for dimension, pattern_ids in DIMENSION_MAP.items():
-        total = len(pattern_ids)
-        weighted_sum = 0.0
-        assessed_patterns = []
-        for pid in pattern_ids:
-            a = assessments.get(pid)
-            status = a["status"] if a else "missing"
-            weight = STATUS_WEIGHTS.get(status, 0.0)
-            weighted_sum += weight
-            assessed_patterns.append({
-                "pattern_id": pid,
-                "status": status,
-                "evidence": a.get("evidence", "") if a else "",
-            })
-        score = round((weighted_sum / total) * 100, 1) if total > 0 else 0.0
-        results[dimension] = {
-            "score": score,
-            "patterns_total": total,
-            "patterns_implemented": sum(1 for p in assessed_patterns if p["status"] == "implemented"),
-            "patterns_partial": sum(1 for p in assessed_patterns if p["status"] == "partial"),
-            "patterns_missing": sum(1 for p in assessed_patterns if p["status"] == "missing"),
-        }
-    return results
-
-
-def _compute_overall_score(dimension_scores: dict[str, dict]) -> float:
-    """Weighted average of dimension scores (equal weights)."""
-    scores = [d["score"] for d in dimension_scores.values()]
-    return round(sum(scores) / len(scores), 1) if scores else 0.0
 
 
 def _compute_maturity_level(assessments: dict[str, dict]) -> dict:
@@ -287,19 +192,28 @@ def _compute_maturity_level(assessments: dict[str, dict]) -> dict:
     return {"current_level": current_level, "level_details": level_details}
 
 
-def _compute_pattern_coverage(assessments: dict[str, dict]) -> list[dict]:
-    """Build full pattern coverage table across all maturity levels."""
+def _compute_pattern_coverage(assessments: dict[str, dict], target_level: int) -> list[dict]:
+    """Build full pattern coverage table across all maturity levels with goals."""
     coverage = []
     for level in sorted(MATURITY_MODEL.keys()):
         for p in MATURITY_MODEL[level]:
             a = assessments.get(p["id"])
             status = a["status"] if a else "missing"
-            # Priority: HIGH if missing/partial and at or below target, lower otherwise
+            # Goal: if already implemented, stays implemented.
+            # If missing/partial and at or below target level, goal is "implemented".
+            # Otherwise goal stays as current status (not targeted yet).
+            if status == "implemented":
+                goal = "implemented"
+            elif level <= target_level:
+                goal = "implemented"
+            else:
+                goal = status
             priority = "HIGH" if status in ("missing", "partial") else "---"
             coverage.append({
                 "pattern_id": p["id"],
                 "pattern_name": p["name"],
                 "status": status,
+                "goal": goal,
                 "maturity_level": level,
                 "chapter": p["chapter"],
                 "priority": priority,
@@ -444,10 +358,8 @@ async def score_architecture(
         target_level = min(current_level + 1, 6)
     target_level = max(1, min(6, target_level))
 
-    # Compute all scores
-    dimension_scores = _compute_dimension_scores(assessments)
-    overall_score = _compute_overall_score(dimension_scores)
-    pattern_coverage = _compute_pattern_coverage(assessments)
+    # Compute all sections
+    pattern_coverage = _compute_pattern_coverage(assessments, target_level)
     gaps = _compute_gap_analysis(assessments, current_level, target_level)
     recommended_metrics = _compute_recommended_metrics(gaps, assessments)
     roadmap = _compute_roadmap(gaps, current_level, target_level)
@@ -467,15 +379,12 @@ async def score_architecture(
             "target_level": target_level,
             "level_details": maturity["level_details"],
         },
-        "overall_score": overall_score,
-        "dimension_scores": dimension_scores,
         "pattern_coverage": {
             "total_assessed": total_assessed,
             "total_patterns_in_model": total_patterns,
             "implemented": implemented,
             "partial": partial,
             "missing": missing,
-            "coverage_pct": round(((implemented + partial * 0.5) / total_patterns) * 100, 1) if total_patterns else 0,
             "details": pattern_coverage,
         },
         "gap_analysis": gaps,

@@ -63,14 +63,16 @@ async def test_full_consultation_flow(consultation_cleanup):
     # Step 5b: Score architecture
     score = await score_architecture(cid)
     assert "error" not in score
-    assert score["overall_score"] >= 0
     assert score["maturity"]["current_level"] >= 0
+    assert "pattern_coverage" in score
+    # Verify goal field exists in coverage details
+    for detail in score["pattern_coverage"]["details"]:
+        assert "goal" in detail
 
     # Step 6: Verify synthesis data is available
     # All the data needed for synthesis should be present
     assert len(subgraph["edges"]) > 0, "Need edges for diagram"
     assert len(book_result["passages"]) > 0, "Need passages for citations"
-    assert len(score["dimension_scores"]) == 5, "Need all 5 dimensions"
 
 
 @pytest.mark.asyncio
