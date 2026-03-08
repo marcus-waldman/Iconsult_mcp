@@ -15,6 +15,11 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent, Tool
 
+from iconsult_mcp.config import TOOL_MAX_RETRIES, TOOL_RETRY_BASE_DELAY, TOOL_TIMEOUT_SECONDS
+
+# Exceptions eligible for retry (network/timeout only, not logic errors)
+RETRYABLE_EXCEPTIONS = (asyncio.TimeoutError, ConnectionError, TimeoutError, OSError)
+from iconsult_mcp.escalation import escalation_response
 from iconsult_mcp.tools.health import health_check
 from iconsult_mcp.tools.list_concepts import list_concepts
 from iconsult_mcp.tools.get_subgraph import get_subgraph
@@ -23,9 +28,76 @@ from iconsult_mcp.tools.match_concepts import match_concepts
 from iconsult_mcp.tools.consultation_report import consultation_report
 from iconsult_mcp.tools.log_pattern_assessment import log_pattern_assessment
 from iconsult_mcp.tools.score_architecture import score_architecture
+from iconsult_mcp.tools.validate_subagent import validate_subagent
+from iconsult_mcp.tools.critique_consultation import critique_consultation
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Per-tool metadata: timeout overrides, retry eligibility, category
+TOOL_METADATA = {
+    "health_check": {"timeout": 10, "retryable": False, "category": "diagnostic"},
+    "match_concepts": {"timeout": 30, "retryable": True, "category": "consultation"},
+    "list_concepts": {"timeout": 15, "retryable": True, "category": "browse"},
+    "get_subgraph": {"timeout": 30, "retryable": True, "category": "consultation"},
+    "ask_book": {"timeout": 30, "retryable": True, "category": "consultation"},
+    "consultation_report": {"timeout": 15, "retryable": False, "category": "consultation"},
+    "score_architecture": {"timeout": 15, "retryable": False, "category": "consultation"},
+    "log_pattern_assessment": {"timeout": 10, "retryable": False, "category": "consultation"},
+    "validate_subagent": {"timeout": 5, "retryable": False, "category": "validation"},
+    "critique_consultation": {"timeout": 10, "retryable": False, "category": "validation"},
+}
+
+# Dispatch table: tool name → handler(arguments) → coroutine
+TOOL_DISPATCH = {
+    "health_check": lambda args: health_check(tool_metadata=TOOL_METADATA),
+    "match_concepts": lambda args: match_concepts(
+        project_description=args.get("project_description", ""),
+        max_results=args.get("max_results", 15),
+        similarity_threshold=args.get("similarity_threshold", 0.3),
+    ),
+    "list_concepts": lambda args: list_concepts(
+        search=args.get("search"),
+        include_definitions=args.get("include_definitions", False),
+    ),
+    "get_subgraph": lambda args: get_subgraph(
+        concept_ids=args.get("concept_ids", []),
+        max_hops=args.get("max_hops", 2),
+        confidence_threshold=args.get("confidence_threshold", 0.5),
+        max_edges=args.get("max_edges", 50),
+        include_descriptions=args.get("include_descriptions", False),
+        consultation_id=args.get("consultation_id"),
+    ),
+    "ask_book": lambda args: ask_book(
+        question=args.get("question", ""),
+        concept_ids=args.get("concept_ids"),
+        max_passages=args.get("max_passages", 3),
+        consultation_id=args.get("consultation_id"),
+    ),
+    "consultation_report": lambda args: consultation_report(
+        consultation_id=args.get("consultation_id", ""),
+        compare_to=args.get("compare_to"),
+    ),
+    "score_architecture": lambda args: score_architecture(
+        consultation_id=args.get("consultation_id", ""),
+        target_level=args.get("target_level"),
+        roadmap_levels=args.get("roadmap_levels", 3),
+    ),
+    "log_pattern_assessment": lambda args: log_pattern_assessment(
+        consultation_id=args.get("consultation_id", ""),
+        pattern_id=args.get("pattern_id", ""),
+        pattern_name=args.get("pattern_name", ""),
+        status=args.get("status", ""),
+        evidence=args.get("evidence", ""),
+        maturity_level=args.get("maturity_level", 1),
+    ),
+    "validate_subagent": lambda args: validate_subagent(
+        response=args.get("response", {}),
+    ),
+    "critique_consultation": lambda args: critique_consultation(
+        consultation_id=args.get("consultation_id", ""),
+    ),
+}
 
 INSTRUCTIONS = """\
 You are an architecture consultant specializing in multi-agent systems. You have \
@@ -92,6 +164,13 @@ Then narrate in 1-2 sentences: the key insight the book provides.
 check coverage gaps before synthesizing. If concept coverage or relationship type \
 coverage is low, go back and explore unexplored concepts or missing edge types. \
 Call `score_architecture` to get the maturity scorecard with current status and goals.
+
+5b. **CRITIQUE (optional)** — Call `critique_consultation` to get a deterministic quality \
+critique of the consultation so far. If errors are found (missing workflow steps, no \
+pattern assessments, critical edges unchecked), use the `prompt_mutations` field to \
+execute the suggested tool calls and address the gaps. Each mutation specifies an action \
+(tool name), params, and reason. Cap this reflection loop at 1 iteration to prevent \
+infinite recursion.
 
 6. **SYNTHESIZE** — Render the entire consultation as a single self-contained HTML page \
 using the `/generate-web-diagram` skill (writes HTML to `~/.agent/diagrams/`, opens in \
@@ -388,79 +467,87 @@ async def list_tools() -> list[Tool]:
                 "required": ["consultation_id", "pattern_id", "pattern_name", "status"],
             },
         ),
+        Tool(
+            name="validate_subagent",
+            description=(
+                "VALIDATE — Schema validation for subagent responses from scatter-gather "
+                "graph traversal. Checks that a subagent response contains the required "
+                "fields (concept, key_relationships, recommendation, discovered_ids) with "
+                "correct types. Returns validation result with errors and warnings. "
+                "No LLM calls — pure structural validation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "response": {
+                        "type": "object",
+                        "description": "The JSON object returned by a graph-analysis subagent",
+                    },
+                },
+                "required": ["response"],
+            },
+        ),
+        Tool(
+            name="critique_consultation",
+            description=(
+                "CRITIQUE — Deterministic quality critique of a consultation session. "
+                "Analyzes logged steps for workflow completeness, traversal depth, "
+                "pattern assessment coverage, passage diversity, and critical edge checks. "
+                "Returns issues with severity (error/warning), categories, and actionable "
+                "suggestions. No LLM calls — pure structural analysis."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session to critique",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
     ]
 
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-    """Handle tool calls."""
+    """Handle tool calls via dispatch table with timeout protection."""
+    handler = TOOL_DISPATCH.get(name)
+    if handler is None:
+        return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
-    if name == "health_check":
-        result = await health_check()
-        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
+    meta = TOOL_METADATA.get(name, {})
+    timeout = meta.get("timeout", TOOL_TIMEOUT_SECONDS)
+    retryable = meta.get("retryable", False)
+    max_retries = TOOL_MAX_RETRIES if retryable else 0
 
-    if name == "match_concepts":
-        result = await match_concepts(
-            project_description=arguments.get("project_description", ""),
-            max_results=arguments.get("max_results", 15),
-            similarity_threshold=arguments.get("similarity_threshold", 0.3),
-        )
-        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
+    last_exc: Exception | None = None
+    for attempt in range(1 + max_retries):
+        try:
+            result = await asyncio.wait_for(handler(arguments), timeout=timeout)
+            return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
+        except RETRYABLE_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                delay = TOOL_RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    f"Tool '{name}' attempt {attempt + 1} failed ({type(exc).__name__}), "
+                    f"retrying in {delay:.1f}s"
+                )
+                await asyncio.sleep(delay)
+            # Fall through to escalation on final attempt
+        except Exception as exc:
+            last_exc = exc
+            break  # Non-retryable exception, escalate immediately
 
-    if name == "list_concepts":
-        result = await list_concepts(
-            search=arguments.get("search"),
-            include_definitions=arguments.get("include_definitions", False),
-        )
-        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
-
-    if name == "get_subgraph":
-        result = await get_subgraph(
-            concept_ids=arguments.get("concept_ids", []),
-            max_hops=arguments.get("max_hops", 2),
-            confidence_threshold=arguments.get("confidence_threshold", 0.5),
-            max_edges=arguments.get("max_edges", 50),
-            include_descriptions=arguments.get("include_descriptions", False),
-            consultation_id=arguments.get("consultation_id"),
-        )
-        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
-
-    if name == "ask_book":
-        result = await ask_book(
-            question=arguments.get("question", ""),
-            concept_ids=arguments.get("concept_ids"),
-            max_passages=arguments.get("max_passages", 3),
-            consultation_id=arguments.get("consultation_id"),
-        )
-        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
-
-    if name == "consultation_report":
-        result = await consultation_report(
-            consultation_id=arguments.get("consultation_id", ""),
-            compare_to=arguments.get("compare_to"),
-        )
-        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
-
-    if name == "score_architecture":
-        result = await score_architecture(
-            consultation_id=arguments.get("consultation_id", ""),
-            target_level=arguments.get("target_level"),
-            roadmap_levels=arguments.get("roadmap_levels", 3),
-        )
-        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
-
-    if name == "log_pattern_assessment":
-        result = await log_pattern_assessment(
-            consultation_id=arguments.get("consultation_id", ""),
-            pattern_id=arguments.get("pattern_id", ""),
-            pattern_name=arguments.get("pattern_name", ""),
-            status=arguments.get("status", ""),
-            evidence=arguments.get("evidence", ""),
-            maturity_level=arguments.get("maturity_level", 1),
-        )
-        return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
-
-    return [TextContent(type="text", text=f"Unknown tool: {name}")]
+    result = escalation_response(
+        tool=name,
+        error=last_exc,
+        timeout_seconds=timeout if isinstance(last_exc, asyncio.TimeoutError) else None,
+        retryable=retryable,
+    )
+    return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 
 
 @server.list_prompts()

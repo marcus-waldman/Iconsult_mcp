@@ -8,7 +8,8 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
-- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`
+- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`
+- Resilience: `escalation.py` (structured error responses), dispatch dict + timeout/retry in `server.py`
 - Developer docs: `docs/development.md`
 
 ## Key Commands
@@ -30,6 +31,11 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `OPENAI_API_KEY` — required for embeddings
 - `ANTHROPIC_API_KEY` — required for extraction pipeline
 
+## Config (config.py)
+- `TOOL_TIMEOUT_SECONDS` = 30 — default timeout for tool calls
+- `TOOL_MAX_RETRIES` = 2 — max retries for retryable tools (ConnectionError, TimeoutError, OSError)
+- `TOOL_RETRY_BASE_DELAY` = 1.0 — base delay for exponential backoff (delay = base × 2^attempt)
+
 ## Database
 - MotherDuck database name: `Iconsult` (override with `ICONSULT_DB` env var)
 - 7 tables + 1 metadata table (see db.py schema); `consultations` table tracks reproducible sessions
@@ -44,6 +50,8 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `consultation_report(consultation_id, compare_to?)` — COVERAGE CHECK: concept/relationship coverage %, passage diversity, gap identification, cross-session diff
 - `log_pattern_assessment(consultation_id, pattern_id, pattern_name, status, evidence?, maturity_level?)` — LOG ASSESSMENT: record a pattern assessment during graph traversal; status is "implemented", "partial", "missing", or "not_applicable" (pattern irrelevant to this architecture); these feed into `score_architecture`
 - `score_architecture(consultation_id, target_level?, roadmap_levels?)` — MATURITY SCORECARD: deterministic scoring from stored `pattern_assessment` steps; computes maturity level (L1-L6), pattern status with phase-aligned goals, gap analysis with severity, recommended metrics, implementation roadmap. `roadmap_levels` (default 3) controls how many levels the roadmap/goals cover. Each pattern gets a `phase` field (1-based) tying it to its implementation phase.
+- `validate_subagent(response)` — VALIDATE: schema validation for subagent JSON responses {concept, key_relationships, recommendation, discovered_ids}; pure structural checks, no LLM
+- `critique_consultation(consultation_id)` — CRITIQUE: deterministic quality critique of consultation steps; checks workflow completeness, traversal depth, assessment coverage, passage diversity, critical edges; returns issues with severity + `prompt_mutations` for adaptive retry
 
 ### Prompt
 - `consult(context)` — guided architecture consultation; interpolates user's project context into the full 6-step workflow
@@ -54,6 +62,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `consultation_id`; call `log_pattern_assessment` for each pattern found/missing/not_applicable in user's code; use "not_applicable" for patterns irrelevant to the architecture (e.g., Agent Calls Human for batch pipelines); merge summaries
 4. RETRIEVE PASSAGES — `ask_book` scoped to discovered concept IDs with `consultation_id`; use `suggested_questions` for follow-ups
 5. CHECK COVERAGE + SCORE — `consultation_report` to verify coverage; `score_architecture` to get maturity scorecard with current status and goals
+5b. CRITIQUE (optional) — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address gaps; cap at 1 iteration
 6. SYNTHESIZE — render entire consultation as a single HTML page via `/generate-web-diagram` skill (ASCII only for <5 nodes). HTML must include in order: (a) Executive Brief callout (3-4 sentences for decision makers), (b) Maturity banner (current → target level), (c) System Under Review (architecture, agent roster with tools), (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail: how implemented / what's missing and why it matters + book ref), (e) Before/After Mermaid diagrams (red gaps / green additions), (f) Implementation Recommendations cards by phase with code snippets + citations, (g) Failure Recovery Chain. Also check prerequisite/conflict edges; render comparison tables as HTML when 4+ rows
 
 ## Literature

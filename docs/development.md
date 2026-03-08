@@ -4,12 +4,13 @@
 
 ```
 src/iconsult_mcp/
-  server.py          MCP server entry point + consulting playbook
-  config.py          Environment + paths
+  server.py          MCP server entry point + dispatch table + consulting playbook
+  config.py          Environment + paths + tool execution config
   db.py              DuckDB/MotherDuck connection + schema
   embed.py           OpenAI embeddings + Claude API (raw urllib)
+  escalation.py      Structured error responses for failed tool calls
   tools/
-    health.py              Health check
+    health.py              Health check (includes tool metadata)
     match_concepts.py      Deterministic concept matching (consultation entry point)
     list_concepts.py       Concept catalogue browser
     get_subgraph.py        Graph traversal (BFS) with consultation logging
@@ -17,6 +18,8 @@ src/iconsult_mcp/
     consultation_report.py Coverage metrics + cross-session comparison
     log_pattern_assessment.py  Log pattern assessments for scoring
     score_architecture.py  Deterministic maturity scoring
+    validate_subagent.py   Schema validation for subagent responses
+    critique_consultation.py  Deterministic quality critique + prompt mutations
 
 tests/
   cases.py           Test case definitions (12 OpenAI agent examples)
@@ -110,6 +113,8 @@ py scripts/run_pipeline.py --reset      # Clear everything and start over
 | `consultation_report` | Coverage check | Computes concept coverage %, relationship type coverage, passage diversity, prerequisite/conflict checks, gap list; optionally diffs two sessions with same fingerprint |
 | `log_pattern_assessment` | **Log assessment** | Records a pattern assessment (implemented/partial/missing/not_applicable) to a consultation's step log; call during graph traversal for each pattern found/missing; use `not_applicable` for patterns irrelevant to the architecture (e.g., Agent Calls Human for batch pipelines); feeds into `score_architecture` |
 | `score_architecture` | **Maturity scorecard** | Deterministic scoring from stored `pattern_assessment` steps; computes maturity level (L1-L6), phase-aligned pattern status with goals, gap analysis with severity, recommended metrics from Ch. 7/8/9, implementation roadmap; `roadmap_levels` (default 3) controls how many levels the roadmap/goals cover; each pattern gets a `phase` field tying it to its implementation phase; N/A patterns don't block level progression; same consultation always produces same results |
+| `validate_subagent` | Validation | Schema validation for subagent JSON responses (`concept`, `key_relationships`, `recommendation`, `discovered_ids`); returns `valid`, `errors`, `warnings`; no LLM calls |
+| `critique_consultation` | **Quality critique** | Deterministic critique of consultation steps; checks workflow completeness, traversal depth, pattern assessment count, passage retrieval, concept/rel-type coverage, critical edges; returns `issues` (severity + category + suggestion) and `prompt_mutations` (concrete tool calls to address gaps); cap reflection loop at 1 iteration |
 
 ### Reproducible Consultations
 
@@ -130,6 +135,7 @@ The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report`
 3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents; call `log_pattern_assessment` for each pattern found/missing/not_applicable in user's code
 4. **RETRIEVE PASSAGES** — `ask_book` scoped to discovered concepts with `consultation_id`; follow `suggested_questions`
 5. **CHECK COVERAGE + SCORE** — `consultation_report` to verify gaps; `score_architecture` for maturity scorecard with current status and goals
+5b. **CRITIQUE (optional)** — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address gaps; cap at 1 iteration
 6. **SYNTHESIZE** — Render entire consultation as a single HTML page via `/generate-web-diagram`. HTML sections in order: (a) Executive Brief callout for decision makers, (b) Maturity banner (current → target), (c) System Under Review with agent roster, (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail + book ref), (e) Before/After Mermaid diagrams (red gaps / green additions), (f) Implementation Recommendation cards by phase with code snippets + citations, (g) Failure Recovery Chain. Also check prerequisite/conflict edges; comparison tables as HTML when 4+ rows
 
 ## Testing
@@ -197,6 +203,24 @@ All parameterized tests automatically pick up new cases. To find valid concept I
 | `test_subgraph.py` | Traversal returns nodes and edges; seeds marked correctly; valid relationship types; `max_edges` respected |
 | `test_score_architecture.py` | Output structure (maturity, pattern coverage with phase-aligned goals, gaps, roadmap); deterministic scoring; empty-consultation error; gap analysis flags missing patterns; N/A patterns don't block levels; phase field correctness |
 | `test_consultation_flow.py` | Full 6-step workflow: match → subgraph → assess → ask_book → report → score |
+
+## Resilience
+
+Tool calls are protected by three layers:
+
+1. **Timeout** — `asyncio.wait_for()` with per-tool timeouts from `TOOL_METADATA` (fallback: `TOOL_TIMEOUT_SECONDS=30`)
+2. **Retry** — Retryable tools (marked in `TOOL_METADATA`) get up to `TOOL_MAX_RETRIES=2` attempts with exponential backoff (`delay = TOOL_RETRY_BASE_DELAY × 2^attempt`) for `ConnectionError`, `TimeoutError`, `OSError` only
+3. **Escalation** — Failed calls return structured responses via `escalation_response()` with `error_type`, `suggestion`, and `retryable` flag instead of raw exceptions
+
+Config in `config.py`: `TOOL_TIMEOUT_SECONDS`, `TOOL_MAX_RETRIES`, `TOOL_RETRY_BASE_DELAY`
+
+### Tool Metadata
+
+`TOOL_METADATA` in `server.py` defines per-tool: `timeout` (seconds), `retryable` (bool), `category`. Exposed in `health_check` response.
+
+### Dispatch Table
+
+`TOOL_DISPATCH` in `server.py` maps tool names to handler lambdas, replacing the if/elif chain. Adding a new tool = adding entries to `TOOL_METADATA`, `TOOL_DISPATCH`, `list_tools()`, and an import.
 
 ## Technical Notes
 
