@@ -69,30 +69,54 @@ flowchart TD
 
 ### How it got there
 
-The consultation followed Iconsult's 5-step workflow:
+The consultation followed Iconsult's guided workflow:
 
 1. **Read the codebase** — Fetched all source files from `manager.py`, `agents/*.py`. Identified the orchestrator pattern in `FinancialResearchManager`, the `.as_tool()` composition, the silent `except Exception: return None` in search, and the terminal verifier.
 
-2. **Map to concepts** — `list_concepts` matched the codebase to: Orchestrator, Planner-Worker, Agent Delegates to Agent, Tool Use, and Supervisor patterns.
+2. **Match concepts** — `match_concepts` embedded the project description and deterministically ranked the most relevant patterns: Orchestrator, Planner-Worker, Agent Delegates to Agent, Tool Use, and Supervisor.
 
-3. **Traverse the graph** — `get_subgraph` explored each seed concept's neighborhood. The `requires` edges revealed that the Supervisor pattern *requires* Auto-Healing — which was entirely missing. The `complements` edges surfaced Hybrid Planner+Scorer as a natural addition.
+2b. **Plan** — `plan_consultation` assessed complexity and generated an adaptive plan — how many concepts to traverse, whether to use subagents, and which critique steps to include.
+
+3. **Traverse the graph** — `get_subgraph` explored each seed concept's neighborhood. The `requires` edges revealed that the Supervisor pattern *requires* Auto-Healing — which was entirely missing. The `complements` edges surfaced Hybrid Planner+Scorer as a natural addition. `log_pattern_assessment` recorded each finding for deterministic scoring.
 
 4. **Retrieve book passages** — `ask_book` scoped to the discovered concepts returned exact citations: chapter numbers, page ranges, and quotes grounding each recommendation.
 
-5. **Synthesize** — Generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
+5. **Score + synthesize** — `score_architecture` computed the maturity scorecard from logged assessments. Then generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
 
 ## What It Does
 
 Iconsult is an MCP server that acts as a technical architecture advisor for multi-agent systems. It's backed by a knowledge graph extracted from *Agentic Architectural Patterns for Building Multi-Agent Systems* (Arsanjani & Bustos, Packt 2026) — meaning every recommendation comes with page numbers, not vibes.
 
-### Tools
+### Tools (16)
+
+**Consultation workflow:**
+
+| Tool | Role | What it does |
+|------|------|-------------|
+| `match_concepts` | Entry point | Embeds a project description → deterministic concept ranking + `consultation_id` for session tracking |
+| `plan_consultation` | Planning | Assesses complexity (simple/moderate/complex) and generates an adaptive step-by-step plan |
+| `get_subgraph` | Graph traversal | Priority-queue BFS from seed concepts — discovers alternatives, prerequisites, conflicts, complements |
+| `log_pattern_assessment` | Assessment | Records whether each pattern is implemented, partial, missing, or not applicable |
+| `ask_book` | Deep context | RAG search against the book — returns passages with chapter, page numbers, and full text |
+| `consultation_report` | Coverage | Computes concept/relationship coverage, identifies gaps, optionally diffs two sessions |
+| `score_architecture` | Scoring | Deterministic maturity scorecard (L1–L6) from logged pattern assessments |
+| `critique_consultation` | Quality | Structural critique of consultation completeness with actionable fix suggestions |
+| `supervise_consultation` | Supervision | Tracks workflow progress across 9 phases, suggests next action with tool + params |
+
+**Coordination:**
 
 | Tool | What it does |
 |------|-------------|
-| `list_concepts` | Browse all 138 concepts in the knowledge graph — your entry point for mapping patterns to concept IDs |
-| `get_subgraph` | Traverse the graph from seed concepts — discovers alternatives, prerequisites, conflicts, and complements |
-| `ask_book` | RAG search against the book — returns passages with chapter, page numbers, and full text |
-| `health_check` | Verify the server is running and the graph is intact |
+| `write_state` / `read_state` | Shared key-value state for subagent coordination during traversal |
+| `emit_event` / `get_events` | Event-driven reactivity — emit events like `gap_found`, poll with filters, get reactive suggestions |
+
+**Utility:**
+
+| Tool | What it does |
+|------|-------------|
+| `list_concepts` | Browse/filter the full 138-concept catalogue |
+| `validate_subagent` | Schema validation for scatter-gather subagent responses |
+| `health_check` | Server health + graph stats |
 
 ### Prompt
 
