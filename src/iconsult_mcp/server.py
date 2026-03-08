@@ -93,19 +93,44 @@ check coverage gaps before synthesizing. If concept coverage or relationship typ
 coverage is low, go back and explore unexplored concepts or missing edge types. \
 Call `score_architecture` to get the maturity scorecard with current status and goals.
 
-6. **SYNTHESIZE** — Deliver project-specific recommendations:
-   - Present the maturity scorecard FIRST, before architecture diagrams. The scorecard \
-must include a Status column (implemented/partial/missing) and a Goal column (target \
-status after recommendations). Then render before/after architecture diagrams.
-   - Ground every recommendation in the user's specific files and code
-   - Render before/after architecture diagrams using the `/generate-web-diagram` skill \
-(writes a self-contained HTML file with Mermaid; opens in browser). Only fall back to \
-ASCII if the diagram has fewer than ~5 nodes and no edge labels.
-   - Cite book passages with chapter and page numbers
+6. **SYNTHESIZE** — Render the entire consultation as a single self-contained HTML page \
+using the `/generate-web-diagram` skill (writes HTML to `~/.agent/diagrams/`, opens in \
+browser). Only fall back to ASCII if the diagram has fewer than ~5 nodes and no edge labels. \
+The HTML page MUST include these sections in order:
+
+   **a. Executive Brief** — A prominent callout box (3-4 sentences) summarizing: what \
+the system is, the key finding (e.g., inverted maturity pyramid, missing prerequisites), \
+the single most important gap, and the recommended path forward. Written for a decision \
+maker who won't read the rest.
+
+   **b. Maturity banner** — Current level and target level, prominently displayed.
+
+   **c. System Under Review** — A section describing what the system does, its \
+architecture, tech stack, coordination mechanism, and an agent roster showing each \
+agent's role and tool set. Provides context for why specific patterns matter.
+
+   **d. Maturity Scorecard table** — Pattern name, Level, Status, Goal, Phase, Evidence. \
+Every pattern name MUST have a **hover tooltip** containing: (1) a concise definition of \
+the pattern, (2) context-sensitive detail — if implemented: how it's done in this codebase; \
+if partial: what's done + what's missing; if missing: why it matters for this specific \
+system, and (3) a book reference with chapter and page.
+
+   **e. Before/After architecture diagrams** — Side-by-side Mermaid flowcharts. Left: \
+current architecture with red warning indicators for gaps. Right: target architecture \
+with green indicators for additions. Color-code: blue for existing, red for gaps, green \
+for new.
+
+   **f. Implementation Recommendations** — Recommendation cards grouped by phase. Each \
+card includes: priority badge, description grounded in the user's specific files, code \
+snippets where applicable, file references, and book citations with chapter and page.
+
+   **g. Failure Recovery Chain** — The recommended failure chain from Ch. 7.
+
+   Additional requirements:
    - Check `requires` edges — flag missing prerequisites
    - Check `conflicts_with` edges — warn about incompatibilities
    - Compare alternatives using `alternative_to` edges with pros/cons. For comparisons \
-with 4+ rows or 3+ columns, use `/generate-web-diagram` to render as a styled HTML table.
+with 4+ rows or 3+ columns, render as a styled HTML table within the same page.
 
 ## Rules
 - Never recommend patterns without first checking prerequisites and conflicts.
@@ -511,15 +536,26 @@ me in 1-2 sentences the key insight the book provides.
 to check coverage gaps. Then call `score_architecture` to get the maturity scorecard \
 with current status and goals. If coverage is low, go back and explore the gaps.
 
-6. **Synthesize recommendations** — Deliver:
-   - The maturity scorecard FIRST, with Status and Goal columns, before architecture diagrams.
-   - Before/after architecture diagrams rendered with `/generate-web-diagram` (HTML + \
-Mermaid, opens in browser). Use ASCII only for trivial diagrams with fewer than ~5 nodes.
-   - Specific file-level changes mapped to my codebase
+6. **Synthesize recommendations** — Render the entire consultation as a **single \
+self-contained HTML page** using `/generate-web-diagram` (opens in browser). \
+Use ASCII only for trivial diagrams with fewer than ~5 nodes. The HTML page must include, \
+in order:
+   a. **Executive Brief** — 3-4 sentence callout box: what the system is, the key finding, \
+the single most important gap, the recommended path forward. For decision makers.
+   b. **Maturity banner** — Current level and target level.
+   c. **System Under Review** — What the system does, its architecture, tech stack, agent \
+roster with roles and tool sets.
+   d. **Maturity Scorecard table** — Pattern, Level, Status, Goal, Phase, Evidence. Every \
+pattern name must have a **hover tooltip** with: (1) pattern definition, (2) if implemented: \
+how it's done in this codebase; if partial: what's done + what's missing; if missing: why \
+it matters for this system, (3) book reference with chapter/page.
+   e. **Before/After architecture diagrams** — Side-by-side Mermaid flowcharts. Red for \
+gaps on left, green for additions on right.
+   f. **Implementation Recommendations** — Cards grouped by phase with priority badges, \
+code snippets, file refs, book citations.
+   g. **Failure Recovery Chain** from Ch. 7.
    - Prerequisites check (requires edges) and conflict warnings (conflicts_with edges)
-   - Comparison of alternatives if multiple approaches exist — render as HTML table via \
-`/generate-web-diagram` when the table has 4+ rows or 3+ columns
-   - Book citations with chapter, page, and brief quotes""",
+   - Comparison of alternatives rendered as HTML table when 4+ rows or 3+ columns""",
                 ),
             ),
         ],

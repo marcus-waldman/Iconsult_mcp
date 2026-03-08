@@ -130,7 +130,7 @@ The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report`
 3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents; call `log_pattern_assessment` for each pattern found/missing/not_applicable in user's code
 4. **RETRIEVE PASSAGES** — `ask_book` scoped to discovered concepts with `consultation_id`; follow `suggested_questions`
 5. **CHECK COVERAGE + SCORE** — `consultation_report` to verify gaps; `score_architecture` for maturity scorecard with current status and goals
-6. **SYNTHESIZE** — Present maturity scorecard FIRST (with Status and Goal columns), then diagrams, file-level changes, citations, prerequisite/conflict checks
+6. **SYNTHESIZE** — Render entire consultation as a single HTML page via `/generate-web-diagram`. HTML sections in order: (a) Executive Brief callout for decision makers, (b) Maturity banner (current → target), (c) System Under Review with agent roster, (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail + book ref), (e) Before/After Mermaid diagrams (red gaps / green additions), (f) Implementation Recommendation cards by phase with code snippets + citations, (g) Failure Recovery Chain. Also check prerequisite/conflict edges; comparison tables as HTML when 4+ rows
 
 ## Testing
 
