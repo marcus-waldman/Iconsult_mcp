@@ -12,6 +12,10 @@ from iconsult_mcp.tools.match_concepts import match_concepts
 from iconsult_mcp.tools.ask_book import ask_book
 from iconsult_mcp.tools.consultation_report import consultation_report
 from iconsult_mcp.tools.score_architecture import score_architecture
+from iconsult_mcp.tools.plan_consultation import plan_consultation
+from iconsult_mcp.tools.supervise_consultation import supervise_consultation
+from iconsult_mcp.tools.shared_state import write_state, read_state
+from iconsult_mcp.tools.events import emit_event, get_events
 from iconsult_mcp.db import get_subgraph, log_consultation_step, get_consultation
 
 
@@ -122,3 +126,67 @@ async def test_ask_book_returns_suggested_questions(consultation_cleanup):
     # Passages should have chapter info
     for passage in book_result["passages"]:
         assert "chapter_number" in passage or "title" in passage
+
+
+@pytest.mark.asyncio
+async def test_full_enhanced_flow(consultation_cleanup):
+    """Run the enhanced workflow with planning, supervision, state, and events."""
+    case = FLOW_CASE
+
+    # Step 1-2: Match concepts
+    match_result = await match_concepts(case["description"], max_results=10)
+    assert "error" not in match_result
+    cid = consultation_cleanup(match_result["consultation_id"])
+    matched_ids = [m["id"] for m in match_result["matched_concepts"]]
+
+    # Step 2b: Plan consultation
+    plan_result = await plan_consultation(cid)
+    assert "error" not in plan_result
+    assert plan_result["step_count"] >= 3
+    assert plan_result["complexity"]["level"] in ("simple", "moderate", "complex")
+
+    # Supervise after planning
+    sup = await supervise_consultation(cid)
+    assert "error" not in sup
+    assert "plan" in sup["progress"]["completed"]
+
+    # Step 3: Traverse graph
+    subgraph = get_subgraph(matched_ids[:5], max_hops=1, confidence_threshold=0.3)
+    assert len(subgraph["nodes"]) > 0
+
+    # Use shared state for coordination
+    await write_state(cid, "discovered_concepts", [n["id"] for n in subgraph["nodes"]])
+    state = await read_state(cid, "discovered_concepts")
+    assert state["count"] == 1
+
+    # Emit event for a gap
+    event_result = await emit_event(cid, "gap_found", {"pattern": "auth"})
+    assert event_result["emitted"] is True
+
+    # Log pattern assessments
+    for pa in case["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    # Step 4: Ask book
+    book_result = await ask_book(
+        question="How should a supervisor architecture coordinate sub-agents?",
+        concept_ids=matched_ids[:3],
+        max_passages=3,
+        consultation_id=cid,
+    )
+    assert "error" not in book_result
+
+    # Step 5: Coverage + Score
+    report = await consultation_report(cid)
+    assert "error" not in report
+
+    score = await score_architecture(cid)
+    assert "error" not in score
+
+    # Poll events
+    events = await get_events(cid)
+    assert events["count"] >= 1
+
+    # Final supervision check
+    final_sup = await supervise_consultation(cid)
+    assert final_sup["progress"]["progress_percent"] > 0

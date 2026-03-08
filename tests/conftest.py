@@ -39,11 +39,19 @@ def consultation_cleanup():
 
     yield register
 
-    # Cleanup: remove test consultations
+    # Cleanup: remove test consultations and related data
     from iconsult_mcp.db import get_connection
 
     conn = get_connection()
     for cid in created_ids:
+        try:
+            conn.execute("DELETE FROM consultation_state WHERE consultation_id = ?", [cid])
+        except Exception:
+            pass
+        try:
+            conn.execute("DELETE FROM consultation_events WHERE consultation_id = ?", [cid])
+        except Exception:
+            pass
         try:
             conn.execute("DELETE FROM consultations WHERE id = ?", [cid])
         except Exception:

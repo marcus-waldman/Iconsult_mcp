@@ -8,7 +8,8 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
-- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`
+- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`
+- L4 modules: `access_policy.py` (tool access levels + consultation ownership validation)
 - Resilience: `escalation.py` (structured error responses), dispatch dict + timeout/retry in `server.py`
 - Developer docs: `docs/development.md`
 
@@ -38,7 +39,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 
 ## Database
 - MotherDuck database name: `Iconsult` (override with `ICONSULT_DB` env var)
-- 7 tables + 1 metadata table (see db.py schema); `consultations` table tracks reproducible sessions
+- 9 tables + 1 metadata table (see db.py schema); `consultations` table tracks reproducible sessions; `consultation_state` for shared epistemic memory; `consultation_events` for event-driven reactivity
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
 
 ## MCP Tools
@@ -52,6 +53,12 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `score_architecture(consultation_id, target_level?, roadmap_levels?)` — MATURITY SCORECARD: deterministic scoring from stored `pattern_assessment` steps; computes maturity level (L1-L6), pattern status with phase-aligned goals, gap analysis with severity, recommended metrics, implementation roadmap. `roadmap_levels` (default 3) controls how many levels the roadmap/goals cover. Each pattern gets a `phase` field (1-based) tying it to its implementation phase.
 - `validate_subagent(response)` — VALIDATE: schema validation for subagent JSON responses {concept, key_relationships, recommendation, discovered_ids}; pure structural checks, no LLM
 - `critique_consultation(consultation_id)` — CRITIQUE: deterministic quality critique of consultation steps; checks workflow completeness, traversal depth, assessment coverage, passage diversity, critical edges; returns issues with severity + `prompt_mutations` for adaptive retry
+- `write_state(consultation_id, key, value)` — SHARED STATE (write): upsert key-value pair for subagent coordination; logs state_write step
+- `read_state(consultation_id, key?)` — SHARED STATE (read): read one key or all entries from shared state
+- `emit_event(consultation_id, event_type, data?)` — EVENT (emit): emit consultation event (gap_found, pattern_assessed, coverage_threshold_reached, coverage_dropped, plan_created, state_conflict); returns reactive suggestion
+- `get_events(consultation_id, since_id?, event_type?)` — EVENT (poll): poll events with optional filters
+- `plan_consultation(consultation_id)` — PLAN: assess complexity (simple/moderate/complex) and generate adaptive step-by-step plan after match_concepts
+- `supervise_consultation(consultation_id)` — SUPERVISE: track workflow progress (phases completed/remaining, percent), suggest next action with tool + params, include event alerts and shared state
 
 ### Prompt
 - `consult(context)` — guided architecture consultation; interpolates user's project context into the full 6-step workflow
@@ -59,7 +66,8 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 ### Consulting workflow (server instructions)
 1. READ PROJECT — read user's codebase first
 2. MATCH CONCEPTS — `match_concepts` with project description → deterministic concept ranking + `consultation_id`
-3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `consultation_id`; call `log_pattern_assessment` for each pattern found/missing/not_applicable in user's code; use "not_applicable" for patterns irrelevant to the architecture (e.g., Agent Calls Human for batch pipelines); merge summaries
+2b. PLAN — `plan_consultation` to assess complexity and generate adaptive plan; optionally `supervise_consultation` after each step
+3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `consultation_id`; call `log_pattern_assessment` for each pattern found/missing/not_applicable; use `write_state`/`read_state` for subagent coordination; use `emit_event` for gap discovery
 4. RETRIEVE PASSAGES — `ask_book` scoped to discovered concept IDs with `consultation_id`; use `suggested_questions` for follow-ups
 5. CHECK COVERAGE + SCORE — `consultation_report` to verify coverage; `score_architecture` to get maturity scorecard with current status and goals
 5b. CRITIQUE (optional) — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address gaps; cap at 1 iteration

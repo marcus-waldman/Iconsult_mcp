@@ -30,22 +30,32 @@ from iconsult_mcp.tools.log_pattern_assessment import log_pattern_assessment
 from iconsult_mcp.tools.score_architecture import score_architecture
 from iconsult_mcp.tools.validate_subagent import validate_subagent
 from iconsult_mcp.tools.critique_consultation import critique_consultation
+from iconsult_mcp.tools.shared_state import write_state, read_state
+from iconsult_mcp.tools.events import emit_event, get_events
+from iconsult_mcp.tools.plan_consultation import plan_consultation
+from iconsult_mcp.tools.supervise_consultation import supervise_consultation
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Per-tool metadata: timeout overrides, retry eligibility, category
+# Per-tool metadata: timeout overrides, retry eligibility, category, access level
 TOOL_METADATA = {
-    "health_check": {"timeout": 10, "retryable": False, "category": "diagnostic"},
-    "match_concepts": {"timeout": 30, "retryable": True, "category": "consultation"},
-    "list_concepts": {"timeout": 15, "retryable": True, "category": "browse"},
-    "get_subgraph": {"timeout": 30, "retryable": True, "category": "consultation"},
-    "ask_book": {"timeout": 30, "retryable": True, "category": "consultation"},
-    "consultation_report": {"timeout": 15, "retryable": False, "category": "consultation"},
-    "score_architecture": {"timeout": 15, "retryable": False, "category": "consultation"},
-    "log_pattern_assessment": {"timeout": 10, "retryable": False, "category": "consultation"},
-    "validate_subagent": {"timeout": 5, "retryable": False, "category": "validation"},
-    "critique_consultation": {"timeout": 10, "retryable": False, "category": "validation"},
+    "health_check": {"timeout": 10, "retryable": False, "category": "diagnostic", "access_level": "admin"},
+    "match_concepts": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "write"},
+    "list_concepts": {"timeout": 15, "retryable": True, "category": "browse", "access_level": "read"},
+    "get_subgraph": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
+    "ask_book": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
+    "consultation_report": {"timeout": 15, "retryable": False, "category": "consultation", "access_level": "read"},
+    "score_architecture": {"timeout": 15, "retryable": False, "category": "consultation", "access_level": "read"},
+    "log_pattern_assessment": {"timeout": 10, "retryable": False, "category": "consultation", "access_level": "write"},
+    "validate_subagent": {"timeout": 5, "retryable": False, "category": "validation", "access_level": "read"},
+    "critique_consultation": {"timeout": 10, "retryable": False, "category": "validation", "access_level": "read"},
+    "write_state": {"timeout": 10, "retryable": False, "category": "coordination", "access_level": "write"},
+    "read_state": {"timeout": 10, "retryable": False, "category": "coordination", "access_level": "read"},
+    "emit_event": {"timeout": 10, "retryable": False, "category": "coordination", "access_level": "write"},
+    "get_events": {"timeout": 10, "retryable": False, "category": "coordination", "access_level": "read"},
+    "plan_consultation": {"timeout": 15, "retryable": False, "category": "consultation", "access_level": "write"},
+    "supervise_consultation": {"timeout": 10, "retryable": False, "category": "consultation", "access_level": "read"},
 }
 
 # Dispatch table: tool name → handler(arguments) → coroutine
@@ -97,6 +107,31 @@ TOOL_DISPATCH = {
     "critique_consultation": lambda args: critique_consultation(
         consultation_id=args.get("consultation_id", ""),
     ),
+    "write_state": lambda args: write_state(
+        consultation_id=args.get("consultation_id", ""),
+        key=args.get("key", ""),
+        value=args.get("value"),
+    ),
+    "read_state": lambda args: read_state(
+        consultation_id=args.get("consultation_id", ""),
+        key=args.get("key"),
+    ),
+    "emit_event": lambda args: emit_event(
+        consultation_id=args.get("consultation_id", ""),
+        event_type=args.get("event_type", ""),
+        data=args.get("data"),
+    ),
+    "get_events": lambda args: get_events(
+        consultation_id=args.get("consultation_id", ""),
+        since_id=args.get("since_id"),
+        event_type=args.get("event_type"),
+    ),
+    "plan_consultation": lambda args: plan_consultation(
+        consultation_id=args.get("consultation_id", ""),
+    ),
+    "supervise_consultation": lambda args: supervise_consultation(
+        consultation_id=args.get("consultation_id", ""),
+    ),
 }
 
 INSTRUCTIONS = """\
@@ -115,6 +150,14 @@ Then narrate in 1-2 sentences: what you found and what the core problem is.
 This deterministically embeds the description and returns ranked concept matches with \
 a `consultation_id` that tracks the session. The same description always produces the \
 same concept ranking. Use `list_concepts` only for browsing/filtering the full catalogue.
+
+2b. **PLAN** — Call `plan_consultation` with the `consultation_id` from step 2. \
+This assesses project complexity (simple/moderate/complex) based on matched concept \
+count, description keywords, and relationship density, then generates an adaptive \
+step-by-step plan. Follow the generated plan for the remaining steps. The plan \
+adjusts traversal depth, subagent usage, and critique requirements based on complexity. \
+Optionally call `supervise_consultation` after each major step to track progress and \
+get the suggested next action.
 
 3. **TRAVERSE GRAPH (scatter-gather)** — For each matched seed concept, spawn a \
 parallel subagent (via the Agent tool) to explore its neighbourhood independently. \
@@ -151,6 +194,11 @@ uses to compute deterministic scores.
 
    Then narrate in 1-2 sentences: the single most significant finding — a missing \
 prerequisite, a conflict, or an alternative worth considering.
+
+   **Shared state:** Use `write_state` and `read_state` to coordinate between \
+subagents — e.g., store discovered concept IDs, current phase, or conflict markers. \
+Use `emit_event` to signal discoveries (e.g., `gap_found` when a critical pattern \
+is missing) and `get_events` to poll for reactive suggestions.
 
    **Fallback:** If subagents are not available, call `get_subgraph` directly with \
 compact defaults (omit optional parameters for the smallest useful response).
@@ -511,6 +559,151 @@ async def list_tools() -> list[Tool]:
                 "required": ["consultation_id"],
             },
         ),
+        Tool(
+            name="write_state",
+            description=(
+                "SHARED STATE (write) — Upsert a key-value pair in consultation shared "
+                "state. Use for subagent coordination: store discovered concepts, current "
+                "phase, conflict markers, or any JSON-serializable value. Logs a state_write "
+                "step to the consultation."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session ID",
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "State key (e.g. 'discovered_concepts', 'current_phase')",
+                    },
+                    "value": {
+                        "description": "Any JSON-serializable value to store",
+                    },
+                },
+                "required": ["consultation_id", "key", "value"],
+            },
+        ),
+        Tool(
+            name="read_state",
+            description=(
+                "SHARED STATE (read) — Read shared state from a consultation. "
+                "Returns one entry if key is specified, or all entries if omitted. "
+                "Use for subagent coordination and progress tracking."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session ID",
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "Specific key to read (omit for all entries)",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
+        Tool(
+            name="emit_event",
+            description=(
+                "EVENT (emit) — Emit a consultation event for reactive processing. "
+                "Valid types: gap_found, pattern_assessed, coverage_threshold_reached, "
+                "coverage_dropped, plan_created, state_conflict. Returns a reactive "
+                "suggestion based on the event type."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session ID",
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "enum": [
+                            "gap_found", "pattern_assessed",
+                            "coverage_threshold_reached", "coverage_dropped",
+                            "plan_created", "state_conflict",
+                        ],
+                        "description": "Type of event to emit",
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "Optional event payload (JSON object)",
+                    },
+                },
+                "required": ["consultation_id", "event_type"],
+            },
+        ),
+        Tool(
+            name="get_events",
+            description=(
+                "EVENT (poll) — Poll consultation events with optional filters. "
+                "Use since_id to get only new events since a previous poll. "
+                "Use event_type to filter by type."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session ID",
+                    },
+                    "since_id": {
+                        "type": "integer",
+                        "description": "Only return events with id > since_id",
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "description": "Filter by event type",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
+        Tool(
+            name="plan_consultation",
+            description=(
+                "PLAN — Generate an adaptive consultation plan after match_concepts. "
+                "Assesses project complexity (simple/moderate/complex) based on concept "
+                "count, description keywords, and relationship density. Returns a "
+                "step-by-step plan with tool names and parameters. Call once after "
+                "match_concepts, then follow the generated plan."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session ID from match_concepts",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
+        Tool(
+            name="supervise_consultation",
+            description=(
+                "SUPERVISE — Track consultation progress and suggest the next action. "
+                "Returns workflow phase progress (percent complete), the recommended "
+                "next tool call with parameters, step summary, recent event alerts, "
+                "and shared state entries. Call after each major step for guided workflow."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session ID",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
     ]
 
 
@@ -608,6 +801,10 @@ what you found and what you see as the core problem.
 summarizing the architecture and pain points you identified. This returns deterministic \
 concept rankings and a `consultation_id` for tracking the session.
 
+2b. **Plan** — Call `plan_consultation` with the `consultation_id`. This assesses \
+complexity and generates an adaptive plan. Follow the plan for remaining steps. \
+Optionally call `supervise_consultation` after each major step for progress tracking.
+
 3. **Traverse the graph (scatter-gather)** — For each matched seed concept, spawn a \
 parallel subagent (via the Agent tool) to explore its neighbourhood. Each subagent calls \
 `get_subgraph` with that single concept, `include_descriptions=true`, and the \
@@ -616,6 +813,8 @@ parallel subagent (via the Agent tool) to explore its neighbourhood. Each subage
 If subagents are not available, call `get_subgraph` directly with compact defaults. \
 **IMPORTANT:** During traversal, call `log_pattern_assessment` for each pattern you \
 identify in my codebase (or confirm is missing). This enables deterministic scoring. \
+Use `write_state`/`read_state` for subagent coordination and `emit_event` to signal \
+discoveries (e.g., `gap_found` when a critical pattern is missing). \
 Then tell me in 1-2 sentences the single most significant finding from the graph.
 
 4. **Retrieve book passages** — Call `ask_book` scoped to the discovered concept \

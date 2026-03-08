@@ -208,6 +208,41 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
+    # --- consultation_state: shared epistemic memory (upsert-by-key) ---
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS consultation_state (
+            consultation_id VARCHAR NOT NULL,
+            key VARCHAR NOT NULL,
+            value_json JSON,
+            updated_at TIMESTAMP DEFAULT current_timestamp,
+            PRIMARY KEY (consultation_id, key)
+        )
+    """)
+
+    # --- consultation_events: event-driven reactivity (poll-based) ---
+    conn.execute("CREATE SEQUENCE IF NOT EXISTS consultation_events_id_seq")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS consultation_events (
+            id INTEGER PRIMARY KEY DEFAULT nextval('consultation_events_id_seq'),
+            consultation_id VARCHAR NOT NULL,
+            event_type VARCHAR NOT NULL,
+            data JSON DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+
+    # Sync events sequence with existing data
+    try:
+        max_eid = conn.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM consultation_events"
+        ).fetchone()[0]
+        if max_eid > 0:
+            conn.execute(
+                f"ALTER SEQUENCE consultation_events_id_seq RESTART WITH {max_eid + 1}"
+            )
+    except Exception as e:
+        logger.warning(f"Could not sync consultation_events_id_seq: {e}")
+
     logger.info("Schema initialized successfully")
 
 
@@ -634,6 +669,136 @@ def get_pattern_assessments(consultation_id: str) -> list[dict]:
 
     steps = _json.loads(row[0]) if row[0] else []
     return [s for s in steps if s.get("type") == "pattern_assessment"]
+
+
+# --- Shared state helpers ---
+
+
+def write_shared_state(
+    consultation_id: str,
+    key: str,
+    value: object,
+) -> None:
+    """Upsert a key-value pair in consultation shared state."""
+    import json as _json
+
+    conn = get_connection()
+    conn.execute(
+        """INSERT OR REPLACE INTO consultation_state
+           (consultation_id, key, value_json, updated_at)
+           VALUES (?, ?, ?, current_timestamp)""",
+        [consultation_id, key, _json.dumps(value)],
+    )
+
+
+def read_shared_state(
+    consultation_id: str,
+    key: str | None = None,
+) -> list[dict]:
+    """Read shared state entries for a consultation.
+
+    Args:
+        consultation_id: The consultation session ID.
+        key: Specific key to read, or None for all entries.
+
+    Returns:
+        List of dicts with key, value, updated_at.
+    """
+    import json as _json
+
+    conn = get_connection()
+    if key:
+        rows = conn.execute(
+            "SELECT key, value_json, updated_at FROM consultation_state WHERE consultation_id = ? AND key = ?",
+            [consultation_id, key],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT key, value_json, updated_at FROM consultation_state WHERE consultation_id = ? ORDER BY key",
+            [consultation_id],
+        ).fetchall()
+
+    return [
+        {
+            "key": r[0],
+            "value": _json.loads(r[1]) if r[1] else None,
+            "updated_at": str(r[2]),
+        }
+        for r in rows
+    ]
+
+
+def delete_shared_state(
+    consultation_id: str,
+    key: str | None = None,
+) -> int:
+    """Delete shared state entries. Returns number of rows deleted."""
+    conn = get_connection()
+    if key:
+        result = conn.execute(
+            "DELETE FROM consultation_state WHERE consultation_id = ? AND key = ?",
+            [consultation_id, key],
+        )
+    else:
+        result = conn.execute(
+            "DELETE FROM consultation_state WHERE consultation_id = ?",
+            [consultation_id],
+        )
+    return result.fetchone()[0] if result.description else 0
+
+
+# --- Consultation event helpers ---
+
+
+def emit_consultation_event(
+    consultation_id: str,
+    event_type: str,
+    data: dict,
+) -> int:
+    """Emit a consultation event. Returns the event ID."""
+    import json as _json
+
+    conn = get_connection()
+    row = conn.execute(
+        """INSERT INTO consultation_events (consultation_id, event_type, data)
+           VALUES (?, ?, ?)
+           RETURNING id""",
+        [consultation_id, event_type, _json.dumps(data)],
+    ).fetchone()
+    return row[0]
+
+
+def get_consultation_events(
+    consultation_id: str,
+    since_id: int | None = None,
+    event_type: str | None = None,
+) -> list[dict]:
+    """Poll consultation events with optional filters."""
+    import json as _json
+
+    conn = get_connection()
+    query = "SELECT id, event_type, data, created_at FROM consultation_events WHERE consultation_id = ?"
+    params: list = [consultation_id]
+
+    if since_id is not None:
+        query += " AND id > ?"
+        params.append(since_id)
+    if event_type is not None:
+        query += " AND event_type = ?"
+        params.append(event_type)
+
+    query += " ORDER BY id ASC"
+    rows = conn.execute(query, params).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "event_type": r[1],
+            "data": _json.loads(r[2]) if r[2] else {},
+            "created_at": str(r[3]),
+        }
+        for r in rows
+    ]
 
 
 def search_sections_by_embedding(

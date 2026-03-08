@@ -9,6 +9,7 @@ src/iconsult_mcp/
   db.py              DuckDB/MotherDuck connection + schema
   embed.py           OpenAI embeddings + Claude API (raw urllib)
   escalation.py      Structured error responses for failed tool calls
+  access_policy.py   Tool access levels + consultation ownership validation
   tools/
     health.py              Health check (includes tool metadata)
     match_concepts.py      Deterministic concept matching (consultation entry point)
@@ -20,6 +21,10 @@ src/iconsult_mcp/
     score_architecture.py  Deterministic maturity scoring
     validate_subagent.py   Schema validation for subagent responses
     critique_consultation.py  Deterministic quality critique + prompt mutations
+    shared_state.py        Shared epistemic memory (write/read key-value state)
+    events.py              Event-driven reactivity (emit/poll events)
+    plan_consultation.py   Adaptive consultation planning
+    supervise_consultation.py  Workflow supervisor (progress + next action)
 
 tests/
   cases.py           Test case definitions (12 OpenAI agent examples)
@@ -28,6 +33,10 @@ tests/
   test_subgraph.py            Graph traversal validation
   test_score_architecture.py  Scoring pipeline + determinism
   test_consultation_flow.py   End-to-end consultation workflow
+  test_shared_state.py        Shared state CRUD
+  test_events.py              Event emit/poll
+  test_plan_consultation.py   Adaptive planning
+  test_supervise_consultation.py  Supervisor progress
 
 scripts/
   run_pipeline.py    Pipeline orchestrator
@@ -55,7 +64,7 @@ literature/
 ## Database
 
 - MotherDuck database name: `iconsult` (override with `ICONSULT_DB` env var)
-- 7 tables + 1 metadata table (see `db.py` for schema)
+- 9 tables + 1 metadata table (see `db.py` for schema)
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
 - `consultations` table tracks reproducible consultation sessions (fingerprint, matched concepts, step log)
 - Scripts use `INSERT OR REPLACE` which DuckDB supports
@@ -115,6 +124,12 @@ py scripts/run_pipeline.py --reset      # Clear everything and start over
 | `score_architecture` | **Maturity scorecard** | Deterministic scoring from stored `pattern_assessment` steps; computes maturity level (L1-L6), phase-aligned pattern status with goals, gap analysis with severity, recommended metrics from Ch. 7/8/9, implementation roadmap; `roadmap_levels` (default 3) controls how many levels the roadmap/goals cover; each pattern gets a `phase` field tying it to its implementation phase; N/A patterns don't block level progression; same consultation always produces same results |
 | `validate_subagent` | Validation | Schema validation for subagent JSON responses (`concept`, `key_relationships`, `recommendation`, `discovered_ids`); returns `valid`, `errors`, `warnings`; no LLM calls |
 | `critique_consultation` | **Quality critique** | Deterministic critique of consultation steps; checks workflow completeness, traversal depth, pattern assessment count, passage retrieval, concept/rel-type coverage, critical edges; returns `issues` (severity + category + suggestion) and `prompt_mutations` (concrete tool calls to address gaps); cap reflection loop at 1 iteration |
+| `write_state` | **Shared state (write)** | Upsert key-value pair in consultation shared state for subagent coordination; logs `state_write` step |
+| `read_state` | **Shared state (read)** | Read one key or all entries from consultation shared state |
+| `emit_event` | **Event (emit)** | Emit consultation event (`gap_found`, `pattern_assessed`, `coverage_threshold_reached`, `coverage_dropped`, `plan_created`, `state_conflict`); returns reactive suggestion |
+| `get_events` | **Event (poll)** | Poll consultation events with optional `since_id` and `event_type` filters |
+| `plan_consultation` | **Adaptive planning** | Assess complexity (simple/moderate/complex) from concept count, keywords, relationship density; generate adaptive step-by-step plan; logs `plan_created` step |
+| `supervise_consultation` | **Workflow supervisor** | Track workflow phases (completed/remaining), compute progress percent, suggest next action with tool + params, include event alerts and shared state |
 
 ### Reproducible Consultations
 
@@ -132,7 +147,8 @@ The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report`
 
 1. **READ PROJECT** — Read the user's codebase
 2. **MATCH CONCEPTS** — `match_concepts` with project description → concept ranking + `consultation_id`
-3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents; call `log_pattern_assessment` for each pattern found/missing/not_applicable in user's code
+2b. **PLAN** — `plan_consultation` to assess complexity and generate adaptive plan; optionally `supervise_consultation` after each step
+3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents; call `log_pattern_assessment` for each pattern; use `write_state`/`read_state` for subagent coordination; use `emit_event` for gap discovery
 4. **RETRIEVE PASSAGES** — `ask_book` scoped to discovered concepts with `consultation_id`; follow `suggested_questions`
 5. **CHECK COVERAGE + SCORE** — `consultation_report` to verify gaps; `score_architecture` for maturity scorecard with current status and goals
 5b. **CRITIQUE (optional)** — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address gaps; cap at 1 iteration
@@ -202,7 +218,11 @@ All parameterized tests automatically pick up new cases. To find valid concept I
 | `test_match_concepts.py` | Expected concepts appear in top-15 matches; scores are sorted descending; same description produces identical ranking |
 | `test_subgraph.py` | Traversal returns nodes and edges; seeds marked correctly; valid relationship types; `max_edges` respected |
 | `test_score_architecture.py` | Output structure (maturity, pattern coverage with phase-aligned goals, gaps, roadmap); deterministic scoring; empty-consultation error; gap analysis flags missing patterns; N/A patterns don't block levels; phase field correctness |
-| `test_consultation_flow.py` | Full 6-step workflow: match → subgraph → assess → ask_book → report → score |
+| `test_consultation_flow.py` | Full workflow: match → plan → subgraph → assess → ask_book → report → score; enhanced flow with events + state |
+| `test_shared_state.py` | Write/read/upsert state, validation, nonexistent key/consultation |
+| `test_events.py` | Emit/poll events, since_id filter, event_type filter, suggestions, validation |
+| `test_plan_consultation.py` | Simple/moderate/complex plans, step logging, complexity assessment |
+| `test_supervise_consultation.py` | Empty/partial/complete progress, event alerts, shared state |
 
 ## Resilience
 
@@ -216,7 +236,7 @@ Config in `config.py`: `TOOL_TIMEOUT_SECONDS`, `TOOL_MAX_RETRIES`, `TOOL_RETRY_B
 
 ### Tool Metadata
 
-`TOOL_METADATA` in `server.py` defines per-tool: `timeout` (seconds), `retryable` (bool), `category`. Exposed in `health_check` response.
+`TOOL_METADATA` in `server.py` defines per-tool: `timeout` (seconds), `retryable` (bool), `category`, `access_level` (read/write/admin). Exposed in `health_check` response.
 
 ### Dispatch Table
 
