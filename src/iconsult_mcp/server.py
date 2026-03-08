@@ -161,8 +161,10 @@ response to ask deterministic follow-up questions derived from graph edges. \
 Then narrate in 1-2 sentences: the key insight the book provides.
 
 5. **CHECK COVERAGE + SCORE** — Call `consultation_report` with the `consultation_id` to \
-check coverage gaps before synthesizing. If concept coverage or relationship type \
-coverage is low, go back and explore unexplored concepts or missing edge types. \
+check coverage gaps before synthesizing. Concept coverage counts matched concepts that \
+were either traversed (get_subgraph) or assessed (log_pattern_assessment). If concept \
+coverage or relationship type coverage is low, go back and explore unexplored concepts \
+or log more pattern assessments. \
 Call `score_architecture` to get the maturity scorecard with current status and goals.
 
 5b. **CRITIQUE (optional)** — Call `critique_consultation` to get a deterministic quality \
@@ -370,10 +372,12 @@ async def list_tools() -> list[Tool]:
             name="consultation_report",
             description=(
                 "COVERAGE CHECK — Compute coverage metrics for a consultation session. "
-                "Shows concept coverage %, relationship type coverage, passage diversity, "
-                "whether prerequisite/conflict edges were checked, and specific gaps. "
-                "Call before synthesizing to ensure thorough coverage. Optionally compare "
-                "two sessions with the same project fingerprint to see diffs."
+                "Concept coverage counts matched concepts that were either traversed "
+                "(get_subgraph seeds) or assessed (log_pattern_assessment). Also shows "
+                "relationship type coverage, passage diversity, prerequisite/conflict "
+                "edge checks, and specific gaps. Call before synthesizing to ensure "
+                "thorough coverage. Optionally compare two sessions with the same "
+                "project fingerprint to see diffs."
             ),
             inputSchema={
                 "type": "object",

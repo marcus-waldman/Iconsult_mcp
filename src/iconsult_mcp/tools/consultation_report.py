@@ -52,14 +52,21 @@ def _compute_metrics(record: dict) -> dict:
     explored_seeds = set()
     discovered_ids = set()
     rel_types_seen = set()
+    # Concepts assessed via log_pattern_assessment
+    assessed_ids = set()
     for step in steps:
         if step.get("type") == "get_subgraph":
             explored_seeds.update(step.get("seed_concept_ids", []))
             discovered_ids.update(step.get("discovered_concept_ids", []))
             rel_types_seen.update(step.get("relationship_types_seen", []))
+        elif step.get("type") == "pattern_assessment":
+            pid = step.get("pattern_id")
+            if pid:
+                assessed_ids.add(pid)
 
-    # Concept coverage
-    explored_matched = matched_ids & explored_seeds
+    # Concept coverage = matched concepts that were either traversed OR assessed
+    engaged_ids = explored_seeds | assessed_ids
+    explored_matched = matched_ids & engaged_ids
     concept_coverage = len(explored_matched) / len(matched_ids) if matched_ids else 0.0
 
     # Relationship type coverage
@@ -79,7 +86,7 @@ def _compute_metrics(record: dict) -> dict:
     critical_checked = bool(rel_types_seen & CRITICAL_EDGE_TYPES)
 
     # Gaps
-    unexplored_concepts = [cid for cid in matched_ids if cid not in explored_seeds]
+    unexplored_concepts = [cid for cid in matched_ids if cid not in engaged_ids]
     missing_rel_types = sorted(ALL_RELATIONSHIP_TYPES - rel_types_seen)
 
     return {

@@ -106,10 +106,14 @@ def _compute_stats(steps: list[dict], matched_ids: set[str]) -> dict:
 
     # Pattern assessments
     assessments = [s for s in steps if s.get("type") == "pattern_assessment"]
+    assessed_ids = set()
     statuses = {}
     for a in assessments:
         st = a.get("status", "unknown")
         statuses[st] = statuses.get(st, 0) + 1
+        pid = a.get("pattern_id")
+        if pid:
+            assessed_ids.add(pid)
 
     # Book queries
     book_steps = [s for s in steps if s.get("type") == "ask_book"]
@@ -117,9 +121,10 @@ def _compute_stats(steps: list[dict], matched_ids: set[str]) -> dict:
     for s in book_steps:
         chapters_seen.update(s.get("chapters_seen", []))
 
-    # Coverage
-    explored_matched = matched_ids & explored_seeds
-    concept_coverage = len(explored_matched) / len(matched_ids) if matched_ids else 0.0
+    # Coverage: concepts are "engaged" if traversed OR assessed
+    engaged_ids = explored_seeds | assessed_ids
+    engaged_matched = matched_ids & engaged_ids
+    concept_coverage = len(engaged_matched) / len(matched_ids) if matched_ids else 0.0
     rel_type_coverage = len(rel_types_seen & ALL_RELATIONSHIP_TYPES) / len(ALL_RELATIONSHIP_TYPES)
 
     return {
@@ -127,7 +132,7 @@ def _compute_stats(steps: list[dict], matched_ids: set[str]) -> dict:
         "step_types_present": sorted(set(step_types)),
         "subgraph_traversals": len(subgraph_steps),
         "concepts_matched": len(matched_ids),
-        "concepts_explored": len(explored_matched),
+        "concepts_explored": len(engaged_matched),
         "concept_coverage": round(concept_coverage, 3),
         "rel_types_seen": sorted(rel_types_seen),
         "rel_types_missing": sorted(ALL_RELATIONSHIP_TYPES - rel_types_seen),
@@ -138,7 +143,7 @@ def _compute_stats(steps: list[dict], matched_ids: set[str]) -> dict:
         "chapters_seen": sorted(chapters_seen),
         "discovered_concepts": len(discovered_ids),
         "critical_edges_checked": bool(rel_types_seen & CRITICAL_EDGE_TYPES),
-        "unexplored_concepts": sorted(matched_ids - explored_seeds),
+        "unexplored_concepts": sorted(matched_ids - engaged_ids),
     }
 
 
