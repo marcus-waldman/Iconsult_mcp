@@ -655,6 +655,16 @@ code snippets, file refs, book citations.
 
 async def run_server():
     """Run the MCP server."""
+    # Warm up MotherDuck connection before accepting tool calls.
+    # get_connection() is blocking (network I/O to MotherDuck cold-start),
+    # so run it in a thread to avoid stalling the event loop.
+    from iconsult_mcp.db import get_connection
+    try:
+        await asyncio.to_thread(get_connection)
+        logger.info("MotherDuck connection warmed up")
+    except Exception as e:
+        logger.warning(f"MotherDuck warm-up failed ({e}), will retry on first tool call")
+
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
