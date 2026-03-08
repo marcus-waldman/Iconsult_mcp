@@ -181,7 +181,7 @@ def _compute_maturity_level(assessments: dict[str, dict]) -> dict:
             status = a["status"] if a else "missing"
             statuses.append({"id": p["id"], "name": p["name"], "status": status})
 
-        all_met = all(s["status"] in ("implemented", "partial") for s in statuses)
+        all_met = all(s["status"] in ("implemented", "partial", "not_applicable") for s in statuses)
         level_details[level] = {
             "patterns": statuses,
             "met": all_met,
@@ -192,28 +192,57 @@ def _compute_maturity_level(assessments: dict[str, dict]) -> dict:
     return {"current_level": current_level, "level_details": level_details}
 
 
-def _compute_pattern_coverage(assessments: dict[str, dict], target_level: int) -> list[dict]:
-    """Build full pattern coverage table across all maturity levels with goals."""
+def _compute_pattern_coverage(
+    assessments: dict[str, dict],
+    current_level: int,
+    target_level: int,
+    roadmap_levels: int,
+) -> list[dict]:
+    """Build full pattern coverage table across all maturity levels with goals.
+
+    Each pattern gets a phase number (1-based) indicating which implementation
+    phase it belongs to, or null if it's beyond the roadmap scope.
+    Phase 1 = patterns needed for target_level, Phase 2 = target_level+1, etc.
+    """
+    # Roadmap covers levels from current_level+1 through current_level+roadmap_levels
+    max_roadmap_level = min(current_level + roadmap_levels, 6)
+
     coverage = []
     for level in sorted(MATURITY_MODEL.keys()):
         for p in MATURITY_MODEL[level]:
             a = assessments.get(p["id"])
             status = a["status"] if a else "missing"
-            # Goal: if already implemented, stays implemented.
-            # If missing/partial and at or below target level, goal is "implemented".
+
+            # Compute phase: which roadmap phase does this level fall into?
+            if level <= current_level or status in ("implemented", "not_applicable"):
+                phase = None  # Already done or not applicable
+            elif level <= max_roadmap_level:
+                phase = level - current_level  # Phase 1, 2, 3, ...
+            else:
+                phase = None  # Beyond roadmap scope
+
+            # Goal: N/A stays N/A. Implemented stays implemented.
+            # If missing/partial and within roadmap scope, goal is "implemented".
             # Otherwise goal stays as current status (not targeted yet).
-            if status == "implemented":
+            if status == "not_applicable":
+                goal = "not_applicable"
+                priority = "---"
+            elif status == "implemented":
                 goal = "implemented"
-            elif level <= target_level:
+                priority = "---"
+            elif level <= max_roadmap_level:
                 goal = "implemented"
+                priority = "HIGH"
             else:
                 goal = status
-            priority = "HIGH" if status in ("missing", "partial") else "---"
+                priority = "HIGH" if status in ("missing", "partial") else "---"
+
             coverage.append({
                 "pattern_id": p["id"],
                 "pattern_name": p["name"],
                 "status": status,
                 "goal": goal,
+                "phase": phase,
                 "maturity_level": level,
                 "chapter": p["chapter"],
                 "priority": priority,
@@ -234,7 +263,7 @@ def _compute_gap_analysis(
         for p in MATURITY_MODEL.get(level, []):
             a = assessments.get(p["id"])
             status = a["status"] if a else "missing"
-            if status == "implemented":
+            if status in ("implemented", "not_applicable"):
                 continue
 
             # Check if this pattern has requires/conflicts_with edges
@@ -327,12 +356,15 @@ def _compute_roadmap(gaps: list[dict], current_level: int, target_level: int) ->
 async def score_architecture(
     consultation_id: str,
     target_level: int | None = None,
+    roadmap_levels: int = 3,
 ) -> dict:
     """Compute deterministic architecture maturity scores from stored assessments.
 
     Args:
         consultation_id: The consultation session to score.
         target_level: Override auto-detected target level (1-6).
+        roadmap_levels: Number of maturity levels the roadmap covers (default 3).
+            Controls the scope of Goal column and implementation phases.
     """
     record = get_consultation(consultation_id)
     if not record:
@@ -357,12 +389,18 @@ async def score_architecture(
     if target_level is None:
         target_level = min(current_level + 1, 6)
     target_level = max(1, min(6, target_level))
+    roadmap_levels = max(1, min(6, roadmap_levels))
 
-    # Compute all sections
-    pattern_coverage = _compute_pattern_coverage(assessments, target_level)
-    gaps = _compute_gap_analysis(assessments, current_level, target_level)
+    # Roadmap scope: from current+1 through current+roadmap_levels
+    max_roadmap_level = min(current_level + roadmap_levels, 6)
+
+    # Compute all sections — gap analysis and roadmap cover the full roadmap scope
+    pattern_coverage = _compute_pattern_coverage(
+        assessments, current_level, target_level, roadmap_levels,
+    )
+    gaps = _compute_gap_analysis(assessments, current_level, max_roadmap_level)
     recommended_metrics = _compute_recommended_metrics(gaps, assessments)
-    roadmap = _compute_roadmap(gaps, current_level, target_level)
+    roadmap = _compute_roadmap(gaps, current_level, max_roadmap_level)
 
     # Summary stats
     total_assessed = len(assessments)
@@ -370,6 +408,7 @@ async def score_architecture(
     implemented = sum(1 for a in assessments.values() if a.get("status") == "implemented")
     partial = sum(1 for a in assessments.values() if a.get("status") == "partial")
     missing = sum(1 for a in assessments.values() if a.get("status") == "missing")
+    not_applicable = sum(1 for a in assessments.values() if a.get("status") == "not_applicable")
 
     return {
         "consultation_id": consultation_id,
@@ -385,6 +424,7 @@ async def score_architecture(
             "implemented": implemented,
             "partial": partial,
             "missing": missing,
+            "not_applicable": not_applicable,
             "details": pattern_coverage,
         },
         "gap_analysis": gaps,

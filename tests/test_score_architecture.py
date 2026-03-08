@@ -48,10 +48,11 @@ async def test_score_produces_valid_output(case, consultation_cleanup):
     assert "gap_analysis" in score
     assert "roadmap" in score
 
-    # Every pattern in coverage details must have a goal field
+    # Every pattern in coverage details must have goal and phase fields
     for detail in score["pattern_coverage"]["details"]:
         assert "goal" in detail, f"Missing goal for {detail['pattern_id']}"
-        assert detail["goal"] in ("implemented", "partial", "missing")
+        assert detail["goal"] in ("implemented", "partial", "missing", "not_applicable")
+        assert "phase" in detail, f"Missing phase for {detail['pattern_id']}"
 
 
 @pytest.mark.asyncio
@@ -107,4 +108,90 @@ async def test_score_gap_analysis_flags_missing(consultation_cleanup):
         if missing_count > 0:
             assert len(score["gap_analysis"]) > 0 or score["maturity"]["current_level"] > 0, (
                 "Should identify gaps when patterns are missing"
+            )
+
+
+@pytest.mark.asyncio
+async def test_not_applicable_does_not_block_level(consultation_cleanup):
+    """Patterns marked not_applicable should not block maturity level progression."""
+    from tests.cases import CASES_BY_ID
+    case = CASES_BY_ID["research_bot"]
+
+    result = await match_concepts(case["description"], max_results=5)
+    cid = consultation_cleanup(result["consultation_id"])
+
+    for pa in case["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    score = await score_architecture(cid)
+    assert "error" not in score, score.get("error")
+
+    # research_bot has agent_calls_human as not_applicable — should not block L1
+    # It still has watchdog_timeout as missing, so it won't fully pass L1,
+    # but the N/A pattern itself should not be counted as a blocker
+    l1_details = score["maturity"]["level_details"][1]
+    human_pattern = next(
+        p for p in l1_details["patterns"] if p["id"] == "agent_calls_human_pattern"
+    )
+    assert human_pattern["status"] == "not_applicable"
+
+    # N/A should not appear in gap analysis
+    gap_ids = [g["pattern_id"] for g in score["gap_analysis"]]
+    assert "agent_calls_human_pattern" not in gap_ids
+
+    # N/A count should be tracked
+    assert score["pattern_coverage"]["not_applicable"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_not_applicable_goal_preserved(consultation_cleanup):
+    """Patterns marked not_applicable should have goal='not_applicable'."""
+    from tests.cases import CASES_BY_ID
+    case = CASES_BY_ID["research_bot"]
+
+    result = await match_concepts(case["description"], max_results=5)
+    cid = consultation_cleanup(result["consultation_id"])
+
+    for pa in case["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    score = await score_architecture(cid)
+
+    na_details = [
+        d for d in score["pattern_coverage"]["details"]
+        if d["status"] == "not_applicable"
+    ]
+    assert len(na_details) >= 1
+    for d in na_details:
+        assert d["goal"] == "not_applicable"
+        assert d["priority"] == "---"
+
+
+@pytest.mark.asyncio
+async def test_phase_field_assigned_correctly(consultation_cleanup):
+    """Phase field should align patterns with their implementation roadmap phase."""
+    from tests.cases import CASES_BY_ID
+    case = CASES_BY_ID["research_bot"]
+
+    result = await match_concepts(case["description"], max_results=5)
+    cid = consultation_cleanup(result["consultation_id"])
+
+    for pa in case["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    score = await score_architecture(cid)
+    current = score["maturity"]["current_level"]
+
+    for detail in score["pattern_coverage"]["details"]:
+        if detail["status"] in ("implemented", "not_applicable"):
+            # Already done patterns have no phase
+            assert detail["phase"] is None, (
+                f"{detail['pattern_name']} is {detail['status']} but has phase={detail['phase']}"
+            )
+        elif detail["phase"] is not None:
+            # Phase should be level - current_level (1-based offset)
+            expected_phase = detail["maturity_level"] - current
+            assert detail["phase"] == expected_phase, (
+                f"{detail['pattern_name']} at L{detail['maturity_level']} should be phase "
+                f"{expected_phase}, got {detail['phase']}"
             )

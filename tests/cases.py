@@ -165,6 +165,27 @@ CASES: list[dict] = [
                 "evidence": "search_agent is a single-agent with web search tool",
                 "maturity_level": 1,
             },
+            {
+                "pattern_id": "function_calling_pattern",
+                "pattern_name": "Function Calling",
+                "status": "implemented",
+                "evidence": "agents use tool calling for web search",
+                "maturity_level": 1,
+            },
+            {
+                "pattern_id": "watchdog_timeout_pattern",
+                "pattern_name": "Watchdog Timeout",
+                "status": "missing",
+                "evidence": "no timeout handling for search agents",
+                "maturity_level": 1,
+            },
+            {
+                "pattern_id": "agent_calls_human_pattern",
+                "pattern_name": "Agent Calls Human",
+                "status": "not_applicable",
+                "evidence": "fully autonomous batch research pipeline, no user interaction needed",
+                "maturity_level": 1,
+            },
         ],
     },
     # ------------------------------------------------------------------

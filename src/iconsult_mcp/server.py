@@ -70,9 +70,12 @@ Collect the subagent summaries and merge discovered concept IDs.
    **IMPORTANT — Log pattern assessments:** During traversal, for each architectural \
 pattern you identify in the user's codebase (or confirm is missing), call \
 `log_pattern_assessment` with the `consultation_id`, `pattern_id`, `pattern_name`, \
-`status` ("implemented", "partial", or "missing"), `evidence`, and `maturity_level` (1-6). \
-Assess as many patterns as you can identify from the user's code. These stored \
-assessments are what `score_architecture` uses to compute deterministic scores.
+`status` ("implemented", "partial", "missing", or "not_applicable"), `evidence`, and \
+`maturity_level` (1-6). Use "not_applicable" when a pattern is irrelevant to the \
+architecture being assessed (e.g., Agent Calls Human for a fully autonomous batch \
+pipeline, or Consensus for a single-supervisor system). Assess as many patterns as you \
+can identify from the user's code. These stored assessments are what `score_architecture` \
+uses to compute deterministic scores.
 
    Then narrate in 1-2 sentences: the single most significant finding — a missing \
 prerequisite, a conflict, or an alternative worth considering.
@@ -305,6 +308,13 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "Override target maturity level (1-6, default: current + 1)",
                     },
+                    "roadmap_levels": {
+                        "type": "integer",
+                        "description": (
+                            "Number of maturity levels the roadmap covers (1-6, default: 3). "
+                            "Controls the scope of Goal column and implementation phases."
+                        ),
+                    },
                 },
                 "required": ["consultation_id"],
             },
@@ -334,8 +344,12 @@ async def list_tools() -> list[Tool]:
                     },
                     "status": {
                         "type": "string",
-                        "enum": ["implemented", "partial", "missing"],
-                        "description": "Whether the pattern is implemented, partial, or missing in the codebase",
+                        "enum": ["implemented", "partial", "missing", "not_applicable"],
+                        "description": (
+                            "Whether the pattern is implemented, partial, missing, or "
+                            "not_applicable (pattern is irrelevant to this architecture, "
+                            "e.g. Agent Calls Human for a batch pipeline)"
+                        ),
                     },
                     "evidence": {
                         "type": "string",
@@ -406,6 +420,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         result = await score_architecture(
             consultation_id=arguments.get("consultation_id", ""),
             target_level=arguments.get("target_level"),
+            roadmap_levels=arguments.get("roadmap_levels", 3),
         )
         return [TextContent(type="text", text=json.dumps(result, separators=(',', ':')))]
 

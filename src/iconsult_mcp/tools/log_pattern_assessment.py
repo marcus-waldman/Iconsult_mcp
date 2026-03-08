@@ -2,7 +2,7 @@
 
 from iconsult_mcp.db import log_consultation_step
 
-VALID_STATUSES = {"implemented", "partial", "missing"}
+VALID_STATUSES = {"implemented", "partial", "missing", "not_applicable"}
 
 
 async def log_pattern_assessment(
