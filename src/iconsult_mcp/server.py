@@ -260,9 +260,12 @@ if partial: what's done + what's missing; if missing: why it matters for this sp
 system, and (3) a book reference with chapter and page.
 
    **e. Before/After architecture diagrams** — Side-by-side Mermaid flowcharts. Left: \
-current architecture with red warning indicators for gaps. Right: target architecture \
-with green indicators for additions. Color-code: blue for existing, red for gaps, green \
-for new.
+current architecture. Right: target architecture. Color-code: blue for existing, red for \
+opportunities, green for new additions. **Every node must have a hover tooltip** (via \
+custom JS/CSS on the rendered SVG) containing: (1) the agent or component's role and \
+responsibilities, (2) why it matters in this architecture, and (3) for the current \
+diagram — what it does today; for the target diagram — what changes or gets added. \
+Use styled HTML tooltips, not browser-native title attributes.
 
    **f. Implementation Recommendations** — Recommendation cards grouped by phase. Each \
 card includes: priority badge, description grounded in the user's specific files, code \
@@ -914,8 +917,11 @@ roster with roles and tool sets.
 pattern name must have a **hover tooltip** with: (1) pattern definition, (2) if implemented: \
 how it's done in this codebase; if partial: what's done + what's missing; if missing: why \
 it matters for this system, (3) book reference with chapter/page.
-   e. **Before/After architecture diagrams** — Side-by-side Mermaid flowcharts. Red for \
-gaps on left, green for additions on right.
+   e. **Before/After architecture diagrams** — Side-by-side Mermaid flowcharts with \
+interactive hover tooltips on every node. Each tooltip shows the agent/component's role, \
+responsibilities, and why it matters. Current diagram: what it does today. Target diagram: \
+what changes or gets added. Use styled HTML tooltips on the rendered SVG, not browser-native \
+title attributes.
    f. **Implementation Recommendations** — Cards grouped by phase with priority badges, \
 code snippets, file refs, book citations.
    g. **Failure Recovery Chain** from Ch. 7.
