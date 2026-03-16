@@ -150,8 +150,8 @@ concepts, their relationships, and full book text.
 ## Consulting Workflow
 
 1. **READ PROJECT** — Always read the user's codebase first. Understand their \
-current architecture, tech stack, and pain points before consulting the graph. \
-Then narrate in 1-2 sentences: what you found and what the core problem is.
+current architecture, tech stack, and goals before consulting the graph. \
+Then narrate in 1-2 sentences: what you found and what the key architectural themes are.
 
 2. **MATCH CONCEPTS** — Call `match_concepts` with a concise project description. \
 This deterministically embeds the description and returns ranked concept matches with \
@@ -205,13 +205,13 @@ and dependency information from `requires` edges. For missing patterns, note wha
 fail — e.g., `{"code_refs": [{"file": "payment.py", "line": 45, "snippet": "resp = \
 api.call()"}], "failure_mode": "No retry logic, API failures propagate to orchestrator"}`.
 
-   Then narrate in 1-2 sentences: the single most significant finding — a missing \
-prerequisite, a conflict, or an alternative worth considering.
+   Then narrate in 1-2 sentences: the single most significant finding — a \
+prerequisite to strengthen, a conflict to address, or an alternative worth exploring.
 
    **Shared state:** Use `write_state` and `read_state` to coordinate between \
 subagents — e.g., store discovered concept IDs, current phase, or conflict markers. \
-Use `emit_event` to signal discoveries (e.g., `gap_found` when a critical pattern \
-is missing) and `get_events` to poll for reactive suggestions.
+Use `emit_event` to signal discoveries (e.g., `gap_found` when an opportunity for \
+a key pattern is identified) and `get_events` to poll for reactive suggestions.
 
    **Fallback:** If subagents are not available, call `get_subgraph` directly with \
 compact defaults (omit optional parameters for the smallest useful response).
@@ -228,8 +228,8 @@ coverage or relationship type coverage is low, go back and explore unexplored co
 or log more pattern assessments. \
 Call `score_architecture` to get the maturity scorecard with current status and goals. \
 Call `generate_failure_scenarios` to produce concrete failure walkthroughs for each gap. \
-These demonstrate what breaks when patterns are missing, using actual code paths \
-(code-grounded mode) or book failure scenarios (book-grounded mode).
+These illustrate how the architecture would benefit from each pattern, using actual \
+code paths (code-grounded mode) or book scenarios (book-grounded mode).
 
 5b. **CRITIQUE (optional)** — Call `critique_consultation` to get a deterministic quality \
 critique of the consultation so far. If errors are found (missing workflow steps, no \
@@ -244,9 +244,8 @@ browser). Only fall back to ASCII if the diagram has fewer than ~5 nodes and no 
 The HTML page MUST include these sections in order:
 
    **a. Executive Brief** — A prominent callout box (3-4 sentences) summarizing: what \
-the system is, the key finding (e.g., inverted maturity pyramid, missing prerequisites), \
-the single most important gap, and the recommended path forward. Written for a decision \
-maker who won't read the rest.
+the system is, what it does well, the single most impactful opportunity for growth, and \
+the recommended path forward. Written for a decision maker who won't read the rest.
 
    **b. Maturity banner** — Current level and target level, prominently displayed.
 
@@ -280,10 +279,22 @@ implemented vs. missing. Flag inverted pyramid warnings where advanced patterns 
 on missing foundations. Use collapsible `<details>/<summary>` elements for each scenario.
 
    Additional requirements:
-   - Check `requires` edges — flag missing prerequisites
-   - Check `conflicts_with` edges — warn about incompatibilities
+   - Check `requires` edges — note prerequisites that would strengthen the foundation
+   - Check `conflicts_with` edges — highlight potential incompatibilities to consider
    - Compare alternatives using `alternative_to` edges with pros/cons. For comparisons \
 with 4+ rows or 3+ columns, render as a styled HTML table within the same page.
+
+## Tone and Framing
+- Frame the consultation as a **growth roadmap**, not a deficiency report. Lead with \
+what the architecture does well before discussing opportunities for improvement.
+- Use "opportunity" or "next step" rather than "gap" or "missing" when narrating findings \
+to the user. The data structures use technical labels — the narrative should be encouraging.
+- Present failure scenarios as **resilience considerations** ("what we can protect against") \
+rather than predictions of failure. The goal is to motivate adoption, not alarm.
+- Celebrate implemented patterns — they represent real engineering investment and thoughtful \
+design decisions.
+- Position recommendations as a natural evolution of what's already working, not a criticism \
+of what's absent.
 
 ## Rules
 - Never recommend patterns without first checking prerequisites and conflicts.
@@ -328,7 +339,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "project_description": {
                         "type": "string",
-                        "description": "Free-text description of the user's project, architecture, and pain points",
+                        "description": "Free-text description of the user's project, architecture, and goals",
                     },
                     "max_results": {
                         "type": "integer",
@@ -371,7 +382,7 @@ async def list_tools() -> list[Tool]:
                 "QUERY PLANNER — Bounded graph traversal from seed concepts. Given one or "
                 "more concept IDs (from match_concepts or list_concepts), performs BFS up to "
                 "max_hops and returns all reachable nodes and edges. Use relationship types to "
-                "discover what the user is missing: alternative_to for competing approaches, "
+                "discover opportunities: alternative_to for competing approaches, "
                 "requires for prerequisites, conflicts_with for incompatibilities, complements "
                 "for synergies. Pass consultation_id to log traversal steps for coverage tracking."
             ),
@@ -740,14 +751,14 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="generate_failure_scenarios",
             description=(
-                "STRESS TEST — Generate concrete failure scenario walkthroughs for "
-                "missing/partial patterns. Each scenario shows a realistic cascading "
-                "failure: trigger event, step-by-step propagation through the architecture "
-                "(with file:line references when code evidence is available), downstream "
-                "impact, and book-cited recovery recommendation. Also maps coverage against "
-                "Ch. 7's five-step failure recovery chain. Flags inverted pyramid warnings "
-                "when advanced patterns depend on missing foundations. Deterministic — same "
-                "consultation always produces same scenarios. Requires pattern_assessment "
+                "RESILIENCE ANALYSIS — Generate concrete scenario walkthroughs for "
+                "patterns not yet in place. Each scenario illustrates how the architecture "
+                "would respond under stress: trigger event, step-by-step propagation through "
+                "the architecture (with file:line references when code evidence is available), "
+                "potential impact, and book-cited recommendations. Also maps coverage against "
+                "Ch. 7's five-step failure recovery chain. Notes foundation dependencies "
+                "when advanced patterns rely on patterns not yet implemented. Deterministic — "
+                "same consultation always produces same scenarios. Requires pattern_assessment "
                 "steps from step 3."
             ),
             inputSchema={
@@ -823,7 +834,7 @@ async def list_prompts() -> list[Prompt]:
                     name="context",
                     description=(
                         "Describe your project: tech stack, current architecture, "
-                        "what you're trying to achieve, and any pain points."
+                        "what you're trying to achieve, and any challenges or goals."
                     ),
                     required=True,
                 ),
@@ -856,10 +867,10 @@ Please follow this workflow:
 
 1. **Read my codebase** — Examine my project files to understand the current \
 architecture, tech stack, and patterns in use. Then tell me in 1-2 sentences \
-what you found and what you see as the core problem.
+what you found and what you see as the key architectural themes and opportunities.
 
 2. **Match concepts** — Call `match_concepts` with a concise project description \
-summarizing the architecture and pain points you identified. This returns deterministic \
+summarizing the architecture and goals you identified. This returns deterministic \
 concept rankings and a `consultation_id` for tracking the session.
 
 2b. **Plan** — Call `plan_consultation` with the `consultation_id`. This assesses \
@@ -873,9 +884,9 @@ parallel subagent (via the Agent tool) to explore its neighbourhood. Each subage
 (~300 tokens) with key findings and discovered concept IDs. Merge the summaries. \
 If subagents are not available, call `get_subgraph` directly with compact defaults. \
 **IMPORTANT:** During traversal, call `log_pattern_assessment` for each pattern you \
-identify in my codebase (or confirm is missing). This enables deterministic scoring. \
-Use `write_state`/`read_state` for subagent coordination and `emit_event` to signal \
-discoveries (e.g., `gap_found` when a critical pattern is missing). \
+identify in my codebase (or confirm is not yet present). This enables deterministic \
+scoring. Use `write_state`/`read_state` for subagent coordination and `emit_event` to \
+signal discoveries (e.g., `gap_found` when an opportunity for a key pattern is identified). \
 Then tell me in 1-2 sentences the single most significant finding from the graph.
 
 4. **Retrieve book passages** — Call `ask_book` scoped to the discovered concept \
@@ -884,17 +895,18 @@ to ask deterministic follow-up questions. Cite chapter and page numbers. Then te
 me in 1-2 sentences the key insight the book provides.
 
 5. **Check coverage and score** — Call `consultation_report` with the `consultation_id` \
-to check coverage gaps. Then call `score_architecture` to get the maturity scorecard \
-with current status and goals. If coverage is low, go back and explore the gaps. \
-Then call `generate_failure_scenarios` to produce concrete failure walkthroughs for \
-each gap — these show cascading failures with code references or book scenarios.
+to check coverage. Then call `score_architecture` to get the maturity scorecard \
+with current status and goals. If coverage is low, go back and explore further. \
+Then call `generate_failure_scenarios` to produce concrete resilience scenarios — \
+these illustrate how the architecture would benefit from each pattern, using code \
+references or book scenarios.
 
 6. **Synthesize recommendations** — Render the entire consultation as a **single \
 self-contained HTML page** using `/generate-web-diagram` (opens in browser). \
 Use ASCII only for trivial diagrams with fewer than ~5 nodes. The HTML page must include, \
 in order:
-   a. **Executive Brief** — 3-4 sentence callout box: what the system is, the key finding, \
-the single most important gap, the recommended path forward. For decision makers.
+   a. **Executive Brief** — 3-4 sentence callout box: what the system is, what it does well, \
+the single most impactful opportunity, the recommended path forward. For decision makers.
    b. **Maturity banner** — Current level and target level.
    c. **System Under Review** — What the system does, its architecture, tech stack, agent \
 roster with roles and tool sets.

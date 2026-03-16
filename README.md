@@ -6,7 +6,7 @@ Iconsult is an MCP server that reviews your multi-agent architecture against a k
 
 ## See It In Action
 
-We pointed Iconsult at OpenAI's [Financial Research Agent](https://github.com/openai/openai-agents-python/tree/main/examples/financial_research_agent) — a 5-stage multi-agent pipeline from their Agents SDK — and asked it to find architectural gaps.
+We pointed Iconsult at OpenAI's [Financial Research Agent](https://github.com/openai/openai-agents-python/tree/main/examples/financial_research_agent) — a 5-stage multi-agent pipeline from their Agents SDK — and asked it to assess architectural maturity.
 
 [![Watch the demo](https://img.youtube.com/vi/GWzlYf5MsHM/maxresdefault.jpg)](https://www.youtube.com/watch?v=GWzlYf5MsHM)
 
@@ -35,9 +35,9 @@ flowchart TD
 
 ### What Iconsult found
 
-Solid foundation, but Iconsult's knowledge graph traversal uncovered 4 critical gaps:
+Solid foundation — and Iconsult's knowledge graph traversal identified 4 key opportunities for growth:
 
-| # | Gap | Missing Pattern | Book Reference |
+| # | Finding | Recommended Pattern | Book Reference |
 |---|-----|----------------|----------------|
 | R1 | Verifier flags issues but pipeline terminates — no self-correction | Auto-Healing Agent Resuscitation | Ch. 7, p. 216 |
 | R2 | Raw search results pass unfiltered to writer | Hybrid Planner+Scorer | Ch. 12, pp. 387-390 |
@@ -46,7 +46,7 @@ Solid foundation, but Iconsult's knowledge graph traversal uncovered 4 critical 
 
 ### Recommended architecture
 
-Adding a feedback loop, quality gate, shared memory, and retry logic:
+The natural next evolution — adding a feedback loop, quality gate, shared memory, and retry logic:
 
 ```mermaid
 flowchart TD
@@ -71,17 +71,17 @@ flowchart TD
 
 The consultation followed Iconsult's guided workflow:
 
-1. **Read the codebase** — Fetched all source files from `manager.py`, `agents/*.py`. Identified the orchestrator pattern in `FinancialResearchManager`, the `.as_tool()` composition, the silent `except Exception: return None` in search, and the terminal verifier.
+1. **Read the codebase** — Fetched all source files from `manager.py`, `agents/*.py`. Identified the orchestrator pattern in `FinancialResearchManager`, the `.as_tool()` composition, the broad `except Exception: return None` in search, and the terminal verifier.
 
 2. **Match concepts** — `match_concepts` embedded the project description and deterministically ranked the most relevant patterns: Orchestrator, Planner-Worker, Agent Delegates to Agent, Tool Use, and Supervisor.
 
 2b. **Plan** — `plan_consultation` assessed complexity and generated an adaptive plan — how many concepts to traverse, whether to use subagents, and which critique steps to include.
 
-3. **Traverse the graph** — `get_subgraph` explored each seed concept's neighborhood. The `requires` edges revealed that the Supervisor pattern *requires* Auto-Healing — which was entirely missing. The `complements` edges surfaced Hybrid Planner+Scorer as a natural addition. `log_pattern_assessment` recorded each finding for deterministic scoring.
+3. **Traverse the graph** — `get_subgraph` explored each seed concept's neighborhood. The `requires` edges revealed that the Supervisor pattern *requires* Auto-Healing — an opportunity not yet in place. The `complements` edges surfaced Hybrid Planner+Scorer as a natural addition. `log_pattern_assessment` recorded each finding for deterministic scoring.
 
 4. **Retrieve book passages** — `ask_book` scoped to the discovered concepts returned exact citations: chapter numbers, page ranges, and quotes grounding each recommendation.
 
-5. **Score + stress test + synthesize** — `score_architecture` computed the maturity scorecard from logged assessments. `generate_failure_scenarios` produced concrete cascading failure traces for each gap — showing exactly what breaks and how failures propagate. Then generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
+5. **Score + stress test + synthesize** — `score_architecture` computed the maturity scorecard from logged assessments. `generate_failure_scenarios` produced concrete resilience scenarios for each opportunity — illustrating how the architecture responds under stress and where it would benefit from additional patterns. Then generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
 
 ## What It Does
 
@@ -98,9 +98,9 @@ Point it at a codebase (or describe your architecture), and it runs a structured
 | `get_subgraph` | Graph traversal | Priority-queue BFS from seed concepts — discovers alternatives, prerequisites, conflicts, complements |
 | `log_pattern_assessment` | Assessment | Records whether each pattern is implemented, partial, missing, or not applicable |
 | `ask_book` | Deep context | RAG search against the book — returns passages with chapter, page numbers, and full text |
-| `consultation_report` | Coverage | Computes concept/relationship coverage, identifies gaps, optionally diffs two sessions |
+| `consultation_report` | Coverage | Computes concept/relationship coverage, identifies opportunities, optionally diffs two sessions |
 | `score_architecture` | Scoring | Deterministic maturity scorecard (L1–L6) from logged pattern assessments |
-| `generate_failure_scenarios` | Stress test | Cascading failure traces for each gap — code-grounded or book-grounded, with Ch. 7 recovery chain mapping |
+| `generate_failure_scenarios` | Resilience analysis | Resilience scenarios for each opportunity — code-grounded or book-grounded, with Ch. 7 recovery chain mapping |
 | `critique_consultation` | Quality | Structural critique of consultation completeness with actionable fix suggestions |
 | `supervise_consultation` | Supervision | Tracks workflow progress across 9 phases, suggests next action with tool + params |
 

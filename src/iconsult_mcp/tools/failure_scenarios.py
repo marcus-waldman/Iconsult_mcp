@@ -1,8 +1,8 @@
-"""Generate concrete failure scenario walkthroughs for missing/partial patterns.
+"""Generate concrete resilience scenario walkthroughs for patterns not yet in place.
 
 Deterministic — same consultation always produces the same scenarios.
 No LLM calls: composes traces from pattern assessments, requires edges,
-and book-derived failure templates.
+and book-derived scenario templates.
 """
 
 from iconsult_mcp.db import get_consultation, get_concept_relationships
@@ -17,7 +17,7 @@ FAILURE_CHAIN: list[dict] = [
         "step": 1,
         "pattern_id": "adaptive_retry_pattern",
         "pattern_name": "Simple Retry",
-        "action": "Agent fails on API/LLM call",
+        "action": "Agent encounters API/LLM call failure",
         "recovery": "Retry with exponential backoff",
         "chapter": 7,
         "page": "214",
@@ -26,7 +26,7 @@ FAILURE_CHAIN: list[dict] = [
         "step": 2,
         "pattern_id": "auto_healing_pattern",
         "pattern_name": "Auto-Healing Agent Resuscitation",
-        "action": "Retries exhausted, agent process crashed",
+        "action": "Retries exhausted, agent process stopped",
         "recovery": "Automatically restart the agent process",
         "chapter": 7,
         "page": "216",
@@ -35,7 +35,7 @@ FAILURE_CHAIN: list[dict] = [
         "step": 3,
         "pattern_id": "fallback_model_invocation_pattern",
         "pattern_name": "Fallback Model Invocation",
-        "action": "Agent still failing after restart",
+        "action": "Agent still unsuccessful after restart",
         "recovery": "Switch to fallback model or redundant agent",
         "chapter": 7,
         "page": "238",
@@ -53,8 +53,8 @@ FAILURE_CHAIN: list[dict] = [
         "step": 5,
         "pattern_id": "watchdog_timeout_pattern",
         "pattern_name": "Watchdog Timeout Supervisor",
-        "action": "Agent hangs or enters infinite loop",
-        "recovery": "Timeout kills unresponsive agent, alerts system",
+        "action": "Agent becomes unresponsive or enters infinite loop",
+        "recovery": "Timeout terminates unresponsive agent, alerts system",
         "chapter": 7,
         "page": "212",
     },
@@ -68,40 +68,40 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
     # Level 1
     "single_agent_baseline_pattern": {
         "trigger": "Core agent logic has no structured task execution",
-        "failure_mode": "Unpredictable output, no tool calling, no task completion tracking",
+        "failure_mode": "Output may lack structure, with no tool calling or task completion tracking",
         "cascade": (
             "Agent produces free-form text instead of structured actions → "
-            "downstream consumers cannot parse output → pipeline stalls"
+            "downstream consumers cannot parse output → pipeline may stall"
         ),
         "book_ref": {"chapter": 9, "page": "309", "section": "Single Agent Baseline"},
     },
     "function_calling_pattern": {
         "trigger": "Agent cannot invoke external tools or APIs",
-        "failure_mode": "Agent hallucinates tool results instead of calling them",
+        "failure_mode": "Agent may generate ungrounded tool results instead of calling APIs",
         "cascade": (
-            "Agent fabricates API response → decisions based on hallucinated data → "
-            "incorrect outputs propagate to downstream agents"
+            "Agent generates assumed API response → decisions based on unverified data → "
+            "unverified outputs may propagate to downstream agents"
         ),
         "book_ref": {"chapter": 9, "page": "309", "section": "Function Calling"},
     },
     "watchdog_timeout_pattern": {
         "trigger": "External API hangs or agent enters infinite loop",
-        "failure_mode": "Agent blocks indefinitely with no timeout",
+        "failure_mode": "Agent may block indefinitely without a timeout",
         "cascade": (
-            "Agent hangs on API call → orchestrator waits forever → "
-            "all downstream agents starve → entire pipeline frozen → "
-            "user sees infinite spinner, resources consumed silently"
+            "Agent hangs on API call → orchestrator waits indefinitely → "
+            "downstream agents remain idle → pipeline stalls → "
+            "user experience degrades, resources consumed without progress"
         ),
         "book_ref": {"chapter": 7, "page": "212", "section": "Watchdog Timeout Supervisor"},
     },
     "agent_calls_human_pattern": {
         "trigger": "Agent encounters ambiguous or high-risk decision",
-        "failure_mode": "No escalation path to human operator",
+        "failure_mode": "No defined escalation path to human operator",
         "cascade": (
             "Agent makes autonomous decision on edge case → "
-            "incorrect action taken (e.g., wrong loan approval) → "
-            "no human review catches the error → "
-            "compliance violation or financial loss"
+            "action taken without human judgment → "
+            "no review step to catch the decision → "
+            "potential compliance or financial risk"
         ),
         "book_ref": {"chapter": 8, "page": "251", "section": "Agent Calls Human"},
     },
@@ -110,8 +110,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Incoming request doesn't match any known intent",
         "failure_mode": "No routing logic; all requests go to one agent",
         "cascade": (
-            "Specialized request hits wrong agent → agent lacks domain knowledge → "
-            "poor quality response → user retries → repeated failures"
+            "Specialized request reaches a generalist agent → agent lacks domain knowledge → "
+            "lower quality response → user retries → repeated attempts needed"
         ),
         "book_ref": {"chapter": 5, "page": "142", "section": "Agent Router"},
     },
@@ -120,17 +120,17 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "failure_mode": "Hardcoded tool selection, no dynamic dispatch",
         "cascade": (
             "New tool added but agent can't discover it → "
-            "misses optimal tool for task → suboptimal results or failure"
+            "misses optimal tool for task → suboptimal results"
         ),
         "book_ref": {"chapter": 9, "page": "309", "section": "Dynamic Tool Selection"},
     },
     "adaptive_retry_pattern": {
         "trigger": "Transient API failure (503, timeout, rate limit)",
-        "failure_mode": "Single failure crashes the entire pipeline",
+        "failure_mode": "Single transient failure can stop the entire pipeline",
         "cascade": (
             "API returns 503 → no retry logic → exception propagates → "
-            "orchestrator receives unhandled error → pipeline halts → "
-            "user sees error, task lost"
+            "orchestrator receives unhandled error → pipeline stops → "
+            "user sees error, task requires manual restart"
         ),
         "book_ref": {"chapter": 7, "page": "214", "section": "Adaptive Retry"},
     },
@@ -139,8 +139,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Agent produces incorrect reasoning on first attempt",
         "failure_mode": "No self-critique or reflection loop",
         "cascade": (
-            "Agent generates flawed analysis → no verification step → "
-            "flawed output passed as final → downstream decisions based on errors"
+            "Agent generates initial analysis → no verification step → "
+            "unreviewed output passed as final → downstream decisions rely on unverified results"
         ),
         "book_ref": {"chapter": 9, "page": "309", "section": "Structured Reasoning"},
     },
@@ -148,19 +148,19 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Agent deviates from system instructions or policy",
         "failure_mode": "No audit trail of instruction adherence",
         "cascade": (
-            "Agent ignores safety guardrails → produces non-compliant output → "
-            "violation goes undetected until production incident → "
-            "regulatory or reputational risk"
+            "Agent drifts from safety guardrails → produces non-compliant output → "
+            "drift goes undetected until production review → "
+            "potential regulatory or reputational risk"
         ),
         "book_ref": {"chapter": 6, "page": "177", "section": "Instruction Fidelity Auditing"},
     },
     "adaptive_retry_with_prompt_mutation": {
         "trigger": "Agent fails deterministically on same input",
-        "failure_mode": "Simple retry repeats the same failing prompt",
+        "failure_mode": "Simple retry repeats the same unsuccessful prompt",
         "cascade": (
             "Prompt misinterpretation causes wrong output → retry sends same prompt → "
-            "same wrong output repeated N times → retries exhausted → "
-            "task fails with no recovery"
+            "same output repeated N times → retries exhausted → "
+            "task cannot complete without prompt adjustment"
         ),
         "book_ref": {"chapter": 7, "page": "214", "section": "Adaptive Retry with Prompt Mutation"},
     },
@@ -169,8 +169,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Multiple agents need coordination for complex task",
         "failure_mode": "No central supervisor; agents operate independently",
         "cascade": (
-            "Agents produce conflicting outputs → no arbitration → "
-            "results merged incorrectly → contradictory final output"
+            "Agents produce differing outputs → no arbitration mechanism → "
+            "results merged without reconciliation → potentially contradictory final output"
         ),
         "book_ref": {"chapter": 5, "page": "142", "section": "Supervisor Architecture"},
     },
@@ -178,8 +178,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Complex task requires decomposition into subtasks",
         "failure_mode": "No planning phase; agents given full task directly",
         "cascade": (
-            "Agent overwhelmed by task complexity → produces shallow output → "
-            "critical subtasks missed → incomplete result"
+            "Agent receives full task complexity at once → produces shallow output → "
+            "subtasks may be overlooked → incomplete result"
         ),
         "book_ref": {"chapter": 5, "page": "142", "section": "Multi-Agent Planning"},
     },
@@ -187,8 +187,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Agent B needs context from Agent A's earlier work",
         "failure_mode": "No shared memory; each agent starts from scratch",
         "cascade": (
-            "Agent B repeats Agent A's work → wasted tokens and time → "
-            "possible contradictions between agents → inconsistent output"
+            "Agent B repeats Agent A's work → duplicated effort and token usage → "
+            "potential inconsistencies between agents → output may lack coherence"
         ),
         "book_ref": {"chapter": 5, "page": "142", "section": "Shared Epistemic Memory"},
     },
@@ -196,9 +196,9 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "System state changes that require immediate response",
         "failure_mode": "Polling-only or no event system",
         "cascade": (
-            "Critical event (e.g., security breach) occurs → "
+            "Important system event occurs → "
             "no event bus to propagate signal → agents continue normal operation → "
-            "delayed response to incident"
+            "delayed awareness and response"
         ),
         "book_ref": {"chapter": 10, "page": "314", "section": "Event-Driven Reactivity"},
     },
@@ -216,9 +216,9 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Agent accesses sensitive data or external API",
         "failure_mode": "No auth layer; all agents have equal access",
         "cascade": (
-            "Compromised or buggy agent accesses all resources → "
-            "data leak or unauthorized action → no audit trail of who accessed what → "
-            "security incident with no forensics"
+            "Agent with a defect accesses all resources → "
+            "potential data exposure or unauthorized action → no audit trail of access → "
+            "limited forensics if an incident occurs"
         ),
         "book_ref": {"chapter": 10, "page": "311", "section": "Agent Authentication & Authorization"},
     },
@@ -228,7 +228,7 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "failure_mode": "Static task assignment, no dynamic allocation",
         "cascade": (
             "Best-suited agent overloaded while others idle → "
-            "suboptimal resource utilization → slow response times"
+            "suboptimal resource utilization → slower response times"
         ),
         "book_ref": {"chapter": 5, "page": "142", "section": "Contract-Net Marketplace"},
     },
@@ -236,8 +236,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Sub-agent crashes and needs restart with capability constraints",
         "failure_mode": "Flat agent topology, no supervision hierarchy",
         "cascade": (
-            "Agent crash propagates upward → no isolation boundary → "
-            "parent crash → cascade failure takes down entire system"
+            "Agent issue propagates upward → no isolation boundary → "
+            "parent affected → cascading impact across the system"
         ),
         "book_ref": {"chapter": 5, "page": "142", "section": "Supervision Tree"},
     },
@@ -245,8 +245,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Agents have conflicting goals or resource constraints",
         "failure_mode": "No negotiation protocol; first-come-first-served",
         "cascade": (
-            "Agents compete for shared resource → deadlock or starvation → "
-            "lower-priority but critical task never completes"
+            "Agents compete for shared resource → potential deadlock or resource contention → "
+            "lower-priority but important task delayed indefinitely"
         ),
         "book_ref": {"chapter": 5, "page": "142", "section": "Agent Negotiation"},
     },
@@ -254,8 +254,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Multiple agents must agree on a shared decision",
         "failure_mode": "Single agent decides unilaterally",
         "cascade": (
-            "Single agent's bias or error goes unchecked → "
-            "no second opinion → wrong decision propagated as consensus"
+            "Single agent's perspective goes unchecked → "
+            "no second opinion → decision propagated without validation"
         ),
         "book_ref": {"chapter": 5, "page": "142", "section": "Consensus Pattern"},
     },
@@ -273,8 +273,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Agent detects its own output quality degradation",
         "failure_mode": "No self-monitoring or correction capability",
         "cascade": (
-            "Quality drifts over time → no detection → "
-            "users notice degradation before system does → trust erodes"
+            "Quality drifts over time → no detection mechanism → "
+            "users notice changes before system does → trust may decline"
         ),
         "book_ref": {"chapter": 9, "page": "309", "section": "Self-Correction"},
     },
@@ -282,8 +282,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "System should learn from past successes and failures",
         "failure_mode": "No feedback loop; same mistakes repeated",
         "cascade": (
-            "Recurring error pattern → no learning mechanism → "
-            "same failure hits in production repeatedly → manual patches each time"
+            "Recurring issue pattern → no learning mechanism → "
+            "same situation arises in production repeatedly → manual intervention each time"
         ),
         "book_ref": {"chapter": 11, "page": "367", "section": "Self-Improvement Flywheel"},
     },
@@ -302,7 +302,7 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "failure_mode": "Agents updated independently without compatibility testing",
         "cascade": (
             "Agent A upgraded but Agent B expects old interface → "
-            "integration failure at runtime → cascading errors across agents"
+            "integration issue at runtime → cascading impact across agents"
         ),
         "book_ref": {"chapter": 14, "page": "497", "section": "Coevolved Agent Training"},
     },
@@ -310,8 +310,8 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
         "trigger": "Critical decision needs validation from multiple agents",
         "failure_mode": "Single agent's output accepted without verification",
         "cascade": (
-            "Agent produces incorrect result → no cross-validation → "
-            "error accepted as truth → wrong decision executed"
+            "Agent produces a result → no cross-validation → "
+            "output accepted without verification → decision proceeds unvalidated"
         ),
         "book_ref": {"chapter": 7, "page": "207", "section": "Majority Voting Across Agents"},
     },
@@ -507,11 +507,12 @@ async def generate_failure_scenarios(
     consultation_id: str,
     max_scenarios: int = 5,
 ) -> dict:
-    """Generate concrete failure scenario walkthroughs for missing/partial patterns.
+    """Generate concrete resilience scenario walkthroughs for patterns not yet in place.
 
-    Each scenario shows a realistic cascading failure: trigger event, step-by-step
-    propagation (with file:line references when code evidence is available), and
-    downstream impact. Also maps coverage against Ch. 7's five-step failure chain.
+    Each scenario illustrates how the architecture would respond under stress: trigger
+    event, step-by-step propagation (with file:line references when code evidence is
+    available), and potential impact. Also maps coverage against Ch. 7's five-step
+    failure chain.
 
     Deterministic — same consultation always produces the same scenarios.
 
@@ -568,7 +569,7 @@ async def generate_failure_scenarios(
             # Build the scenario
             scenario = {
                 "scenario_id": len(scenarios) + 1,
-                "title": f"{'No ' if status == 'missing' else 'Weak '}{pattern['name']} → {template['trigger']}",
+                "title": f"{'Without ' if status == 'missing' else 'Strengthening '}{pattern['name']} → {template['trigger']}",
                 "trigger": template["trigger"],
                 "missing_pattern": {
                     "id": pid,
@@ -608,8 +609,8 @@ async def generate_failure_scenarios(
             if dependents:
                 scenario["inverted_pyramid"] = {
                     "warning": (
-                        f"{pattern['name']} (L{level}) is missing but these "
-                        f"higher-level patterns depend on it"
+                        f"{pattern['name']} (L{level}) is not yet in place — "
+                        f"these higher-level patterns would benefit from it as a foundation"
                     ),
                     "affected_patterns": dependents,
                 }
