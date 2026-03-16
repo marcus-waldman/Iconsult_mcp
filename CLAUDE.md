@@ -8,7 +8,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
-- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`
+- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`, `tools/implementation_plan.py`
 - L4 modules: `access_policy.py` (tool access levels + consultation ownership validation)
 - Resilience: `escalation.py` (structured error responses), dispatch dict + timeout/retry in `server.py`
 - Developer docs: `docs/development.md`
@@ -25,7 +25,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - Integration tests in `tests/` — require MOTHERDUCK_TOKEN and OPENAI_API_KEY env vars
 - Test cases in `tests/cases.py` — 12 architectures derived from openai/openai-agents-python examples
 - Adding a test case = adding a dict to `CASES` in `tests/cases.py` (id, description, expected_concepts, pattern_assessments)
-- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_consultation_flow.py` (end-to-end)
+- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_implementation_plan.py` (plan generation/tracking), `test_consultation_flow.py` (end-to-end)
 
 ## Environment Variables
 - `MOTHERDUCK_TOKEN` — required for database
@@ -39,7 +39,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 
 ## Database
 - MotherDuck database name: `Iconsult` (override with `ICONSULT_DB` env var)
-- 9 tables + 1 metadata table (see db.py schema); `consultations` table tracks reproducible sessions; `consultation_state` for shared epistemic memory; `consultation_events` for event-driven reactivity
+- 10 tables + 1 metadata table (see db.py schema); `consultations` table tracks reproducible sessions; `consultation_state` for shared epistemic memory; `consultation_events` for event-driven reactivity; `implementation_plans` for cross-session plan persistence
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
 
 ## MCP Tools
@@ -60,9 +60,12 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `plan_consultation(consultation_id)` — PLAN: assess complexity (simple/moderate/complex) and generate adaptive step-by-step plan after match_concepts
 - `supervise_consultation(consultation_id)` — SUPERVISE: track workflow progress (phases completed/remaining, percent), suggest next action with tool + params, include event alerts and shared state
 - `generate_failure_scenarios(consultation_id, max_scenarios?)` — RESILIENCE ANALYSIS: deterministic resilience scenario walkthroughs for patterns not yet in place; each scenario illustrates how the architecture responds under stress (trigger → propagation steps with file:line refs when code available → potential impact); maps Ch. 7 five-step failure chain; notes foundation dependencies when advanced patterns rely on patterns not yet implemented; two modes: code-grounded (from `failure_context.code_refs`) or book-grounded (from pattern scenario templates)
+- `generate_implementation_plan(consultation_id, output_dir?)` — IMPLEMENTATION PLAN: generate phased markdown checklist from consultation results; classifies steps as "mechanical" (concrete code changes) or "design_decision" (architectural choices); writes markdown to disk, stores plan JSON in DuckDB for cross-session tracking
+- `get_implementation_plan(consultation_id)` — GET PLAN: retrieve previously generated plan with progress summary
+- `update_plan_step(consultation_id, step_id, status, notes?)` — UPDATE STEP: update step status (pending/in_progress/completed/skipped); recomputes summary, regenerates markdown
 
 ### Prompt
-- `consult(context)` — guided architecture consultation; interpolates user's project context into the full 6-step workflow
+- `consult(context)` — guided architecture consultation; interpolates user's project context into the full 7-step workflow
 
 ### Consulting workflow (server instructions)
 1. READ PROJECT — read user's codebase first
@@ -73,6 +76,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 5. CHECK COVERAGE + SCORE + RESILIENCE — `consultation_report` to verify coverage; `score_architecture` to get maturity scorecard with current status and goals; `generate_failure_scenarios` to produce concrete resilience scenarios for opportunities
 5b. CRITIQUE (optional) — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address any coverage shortfalls; cap at 1 iteration
 6. SYNTHESIZE — render entire consultation as a single HTML page via `/generate-web-diagram` skill (ASCII only for <5 nodes). HTML must include in order: (a) Executive Brief callout (what system does well + most impactful opportunity, for decision makers), (b) Maturity banner (current → target level), (c) System Under Review (architecture, agent roster with tools), (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail: how implemented / what's the opportunity and why it matters + book ref), (e) Before/After Mermaid diagrams with interactive hover tooltips on every node (role, responsibilities, why it matters; current: what it does today, target: what changes/additions), (f) Implementation Recommendations cards by phase with code snippets + citations, (g) Failure Recovery Chain, (h) Resilience Scenarios (collapsible scenario traces with code refs, book citations, foundation dependency notes, Ch. 7 recovery chain coverage). Also check prerequisite/conflict edges; render comparison tables as HTML when 4+ rows
+7. OFFER IMPLEMENTATION PLAN — ask user if they want a step-by-step plan; if yes, `generate_implementation_plan`; recommend fresh conversation for implementation using `get_implementation_plan` + `update_plan_step`
 
 ## Literature
 - Book markdown: `literature/Arsanjani and Bustos - 2026 - ....md`

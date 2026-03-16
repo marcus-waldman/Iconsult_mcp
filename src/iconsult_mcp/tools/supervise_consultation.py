@@ -22,6 +22,8 @@ WORKFLOW_PHASES = [
     {"phase": "failure_scenarios", "step_types": ["failure_scenarios"], "label": "Generate Failure Scenarios"},
     {"phase": "critique", "step_types": ["critique"], "label": "Critique Consultation"},
     {"phase": "synthesize", "step_types": ["synthesis"], "label": "Synthesize Report"},
+    {"phase": "generate_plan", "step_types": ["implementation_plan_generated"], "label": "Generate Implementation Plan"},
+    {"phase": "implement", "step_types": ["plan_step_updated"], "label": "Implement Plan Steps"},
 ]
 
 
@@ -168,6 +170,22 @@ def _determine_next_action(record: dict, progress: dict) -> dict:
             "tool": "generate-web-diagram",
             "params": {},
             "reason": "All analysis complete. Render the consultation as HTML.",
+        }
+
+    if current == "generate_plan":
+        return {
+            "action": "generate_plan",
+            "tool": "generate_implementation_plan",
+            "params": {"consultation_id": cid},
+            "reason": "Report rendered. Ask the user if they want an implementation plan.",
+        }
+
+    if current == "implement":
+        return {
+            "action": "implement",
+            "tool": "update_plan_step",
+            "params": {"consultation_id": cid},
+            "reason": "Implementation plan generated. Update step statuses as work progresses.",
         }
 
     return {

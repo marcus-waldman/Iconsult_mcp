@@ -31,6 +31,9 @@ TOOL_ACCESS = {
     "plan_consultation": "write",
     "supervise_consultation": "read",
     "generate_failure_scenarios": "read",
+    "generate_implementation_plan": "write",
+    "get_implementation_plan": "read",
+    "update_plan_step": "write",
 }
 
 

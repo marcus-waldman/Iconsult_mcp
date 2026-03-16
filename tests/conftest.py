@@ -45,6 +45,10 @@ def consultation_cleanup():
     conn = get_connection()
     for cid in created_ids:
         try:
+            conn.execute("DELETE FROM implementation_plans WHERE consultation_id = ?", [cid])
+        except Exception:
+            pass
+        try:
             conn.execute("DELETE FROM consultation_state WHERE consultation_id = ?", [cid])
         except Exception:
             pass

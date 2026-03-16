@@ -35,6 +35,11 @@ from iconsult_mcp.tools.events import emit_event, get_events
 from iconsult_mcp.tools.plan_consultation import plan_consultation
 from iconsult_mcp.tools.supervise_consultation import supervise_consultation
 from iconsult_mcp.tools.failure_scenarios import generate_failure_scenarios
+from iconsult_mcp.tools.implementation_plan import (
+    generate_implementation_plan,
+    get_implementation_plan as get_impl_plan,
+    update_plan_step,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,6 +63,9 @@ TOOL_METADATA = {
     "plan_consultation": {"timeout": 15, "retryable": False, "category": "consultation", "access_level": "write"},
     "supervise_consultation": {"timeout": 10, "retryable": False, "category": "consultation", "access_level": "read"},
     "generate_failure_scenarios": {"timeout": 15, "retryable": False, "category": "consultation", "access_level": "read"},
+    "generate_implementation_plan": {"timeout": 15, "retryable": False, "category": "consultation", "access_level": "write"},
+    "get_implementation_plan": {"timeout": 10, "retryable": False, "category": "consultation", "access_level": "read"},
+    "update_plan_step": {"timeout": 10, "retryable": False, "category": "consultation", "access_level": "write"},
 }
 
 # Dispatch table: tool name → handler(arguments) → coroutine
@@ -138,6 +146,19 @@ TOOL_DISPATCH = {
     "generate_failure_scenarios": lambda args: generate_failure_scenarios(
         consultation_id=args.get("consultation_id", ""),
         max_scenarios=args.get("max_scenarios", 5),
+    ),
+    "generate_implementation_plan": lambda args: generate_implementation_plan(
+        consultation_id=args.get("consultation_id", ""),
+        output_dir=args.get("output_dir"),
+    ),
+    "get_implementation_plan": lambda args: get_impl_plan(
+        consultation_id=args.get("consultation_id", ""),
+    ),
+    "update_plan_step": lambda args: update_plan_step(
+        consultation_id=args.get("consultation_id", ""),
+        step_id=args.get("step_id", ""),
+        status=args.get("status", ""),
+        notes=args.get("notes", ""),
     ),
 }
 
@@ -286,6 +307,14 @@ on missing foundations. Use collapsible `<details>/<summary>` elements for each 
    - Check `conflicts_with` edges — highlight potential incompatibilities to consider
    - Compare alternatives using `alternative_to` edges with pros/cons. For comparisons \
 with 4+ rows or 3+ columns, render as a styled HTML table within the same page.
+
+7. **OFFER IMPLEMENTATION PLAN** — After rendering the HTML report, ask the user \
+whether they would like a step-by-step implementation plan. If yes, call \
+`generate_implementation_plan`. This produces a phased markdown checklist with steps \
+classified as "mechanical" (concrete code changes) or "design_decision" (architectural \
+choices needed). After generating, recommend the user start a fresh conversation for \
+implementation to keep context clean. In the fresh conversation, use \
+`get_implementation_plan` to load the plan and `update_plan_step` to track progress.
 
 ## Tone and Framing
 - Frame the consultation as a **growth roadmap**, not a deficiency report. Lead with \
@@ -779,6 +808,80 @@ async def list_tools() -> list[Tool]:
                 "required": ["consultation_id"],
             },
         ),
+        Tool(
+            name="generate_implementation_plan",
+            description=(
+                "IMPLEMENTATION PLAN — Generate a phased, classified implementation plan "
+                "from consultation results. Builds on score_architecture internals to produce "
+                "a markdown checklist with steps classified as 'mechanical' (concrete code "
+                "changes) or 'design_decision' (architectural choices needed). Writes markdown "
+                "to disk and stores plan in DuckDB for cross-session tracking. Requires "
+                "pattern_assessment steps from step 3."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session to generate a plan for",
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        "description": "Directory for markdown file (default: ~/.agent/diagrams/)",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
+        Tool(
+            name="get_implementation_plan",
+            description=(
+                "GET PLAN — Retrieve a previously generated implementation plan with "
+                "current progress. Returns the full plan JSON, markdown file path, "
+                "timestamps, and progress summary."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session to retrieve the plan for",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
+        Tool(
+            name="update_plan_step",
+            description=(
+                "UPDATE STEP — Update the status of a step in an implementation plan. "
+                "Tracks progress across conversations. Updates both the DuckDB record "
+                "and the markdown file on disk."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session",
+                    },
+                    "step_id": {
+                        "type": "string",
+                        "description": "The step to update (e.g. '1.1')",
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "completed", "skipped"],
+                        "description": "New status for the step",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional notes about the update",
+                    },
+                },
+                "required": ["consultation_id", "step_id", "status"],
+            },
+        ),
     ]
 
 
@@ -930,7 +1033,11 @@ CRITICAL/WARNING gap. Each trace: trigger, propagation steps with file:line refs
 impact, book citation, recovery recommendation. Include Ch. 7 failure chain coverage \
 diagram and inverted pyramid warnings.
    - Prerequisites check (requires edges) and conflict warnings (conflicts_with edges)
-   - Comparison of alternatives rendered as HTML table when 4+ rows or 3+ columns""",
+   - Comparison of alternatives rendered as HTML table when 4+ rows or 3+ columns
+
+7. **Implementation plan** — Ask me whether I'd like a concrete implementation plan. \
+If yes, call `generate_implementation_plan`. Then recommend a fresh conversation for \
+implementation using `get_implementation_plan` and `update_plan_step`.""",
                 ),
             ),
         ],

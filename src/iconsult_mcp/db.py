@@ -243,6 +243,17 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
     except Exception as e:
         logger.warning(f"Could not sync consultation_events_id_seq: {e}")
 
+    # --- implementation_plans: persistent implementation plan storage ---
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS implementation_plans (
+            consultation_id VARCHAR PRIMARY KEY,
+            plan_json JSON NOT NULL,
+            markdown_path VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     logger.info("Schema initialized successfully")
 
 
@@ -852,3 +863,52 @@ def search_sections_by_embedding(
         }
         for r in results
     ]
+
+
+# --- Implementation plan helpers ---
+
+
+def upsert_implementation_plan(
+    consultation_id: str,
+    plan_json: dict,
+    markdown_path: str | None = None,
+) -> None:
+    """Insert or replace an implementation plan for a consultation."""
+    import json as _json
+
+    conn = get_connection()
+    conn.execute(
+        """INSERT OR REPLACE INTO implementation_plans
+           (consultation_id, plan_json, markdown_path, created_at, updated_at)
+           VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+        [consultation_id, _json.dumps(plan_json), markdown_path],
+    )
+
+
+def get_implementation_plan_record(consultation_id: str) -> dict | None:
+    """Return an implementation plan record, or None if not found."""
+    import json as _json
+
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT consultation_id, plan_json, markdown_path, created_at, updated_at FROM implementation_plans WHERE consultation_id = ?",
+        [consultation_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "consultation_id": row[0],
+        "plan_json": _json.loads(row[1]) if row[1] else {},
+        "markdown_path": row[2],
+        "created_at": str(row[3]),
+        "updated_at": str(row[4]),
+    }
+
+
+def delete_implementation_plan(consultation_id: str) -> None:
+    """Delete an implementation plan (for test cleanup)."""
+    conn = get_connection()
+    conn.execute(
+        "DELETE FROM implementation_plans WHERE consultation_id = ?",
+        [consultation_id],
+    )

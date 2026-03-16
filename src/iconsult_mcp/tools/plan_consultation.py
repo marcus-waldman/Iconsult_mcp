@@ -155,6 +155,15 @@ def _generate_plan(
             "description": "Render consultation as HTML",
         })
 
+        step_num += 1
+        steps.append({
+            "step_number": step_num,
+            "action": "generate_plan",
+            "tool": "generate_implementation_plan",
+            "params": {},
+            "description": "Offer implementation plan (ask user first)",
+        })
+
     elif level == "moderate":
         top_n = min(5, matched_count)
         max_hops = 2
@@ -238,6 +247,15 @@ def _generate_plan(
             "tool": "generate-web-diagram",
             "params": {},
             "description": "Render consultation as HTML",
+        })
+
+        step_num += 1
+        steps.append({
+            "step_number": step_num,
+            "action": "generate_plan",
+            "tool": "generate_implementation_plan",
+            "params": {},
+            "description": "Offer implementation plan (ask user first)",
         })
 
     else:  # complex
@@ -336,6 +354,15 @@ def _generate_plan(
             "tool": "generate-web-diagram",
             "params": {},
             "description": "Render consultation as HTML",
+        })
+
+        step_num += 1
+        steps.append({
+            "step_number": step_num,
+            "action": "generate_plan",
+            "tool": "generate_implementation_plan",
+            "params": {},
+            "description": "Offer implementation plan (ask user first)",
         })
 
     return steps
