@@ -87,7 +87,7 @@ The consultation followed Iconsult's guided workflow:
 
 Point it at a codebase (or describe your architecture), and it runs a structured consultation: matching concepts, traversing the knowledge graph for prerequisites and conflicts, scoring maturity against a 6-level model, and generating an interactive HTML review with before/after architecture diagrams.
 
-### Tools (17)
+### Tools (24)
 
 **Consultation workflow:**
 
@@ -99,24 +99,30 @@ Point it at a codebase (or describe your architecture), and it runs a structured
 | `log_pattern_assessment` | Assessment | Records whether each pattern is implemented, partial, missing, or not applicable |
 | `ask_book` | Deep context | RAG search against the book — returns passages with chapter, page numbers, and full text |
 | `consultation_report` | Coverage | Computes concept/relationship coverage, identifies opportunities, optionally diffs two sessions |
-| `score_architecture` | Scoring | Deterministic maturity scorecard (L1–L6) from logged pattern assessments |
+| `score_architecture` | Scoring | Deterministic maturity scorecard (L1–L6) from logged pattern assessments; pattern ID aliases bridge KG ↔ maturity model IDs |
 | `generate_failure_scenarios` | Resilience analysis | Resilience scenarios for each opportunity — code-grounded or book-grounded, with Ch. 7 recovery chain mapping |
-| `critique_consultation` | Quality | Structural critique of consultation completeness with actionable fix suggestions |
+| `critique_consultation` | Quality | Structural critique with actionable fix suggestions; multi-iteration mode (1-3 passes) with convergence detection |
 | `supervise_consultation` | Supervision | Tracks workflow progress across 9 phases, suggests next action with tool + params |
+| `generate_implementation_plan` | Implementation | Phased markdown checklist from consultation results; classifies steps as mechanical or design decision |
+| `get_implementation_plan` | Implementation | Retrieve a previously generated plan with progress summary |
+| `update_plan_step` | Implementation | Update step status (pending/in_progress/completed/skipped); recomputes summary |
 
 **Coordination:**
 
 | Tool | What it does |
 |------|-------------|
 | `write_state` / `read_state` | Shared key-value state for subagent coordination during traversal |
+| `assert_fact` / `query_facts` | Blackboard Knowledge Hub — typed, versioned facts with conflict detection, confidence scores, and TTL |
 | `emit_event` / `get_events` | Event-driven reactivity — emit events like `gap_found`, poll with filters, get reactive suggestions |
 
-**Utility:**
+**Quality & utility:**
 
 | Tool | What it does |
 |------|-------------|
+| `rate_consultation` | Record user quality score (1-5) and/or feedback with metadata snapshot |
+| `consultation_analytics` | Surface quality trends across consultations (avg rating, coverage, distribution) |
 | `list_concepts` | Browse/filter the full 138-concept catalogue |
-| `validate_subagent` | Schema validation for scatter-gather subagent responses |
+| `validate_subagent` | Schema validation for subagent responses; optional semantic validation against the knowledge graph |
 | `health_check` | Server health + graph stats |
 
 ### Prompt
@@ -207,4 +213,4 @@ iconsult-mcp --check
 
 ## License
 
-MIT
+AGPL-3.0 — see [LICENSE](LICENSE) for details.

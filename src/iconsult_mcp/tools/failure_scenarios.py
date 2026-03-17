@@ -6,7 +6,11 @@ and book-derived scenario templates.
 """
 
 from iconsult_mcp.db import get_consultation, get_concept_relationships
-from iconsult_mcp.tools.score_architecture import MATURITY_MODEL, PATTERN_METRICS
+from iconsult_mcp.tools.score_architecture import (
+    MATURITY_MODEL,
+    PATTERN_METRICS,
+    _get_pattern_assessments,
+)
 
 # ---------------------------------------------------------------------------
 # Ch. 7 five-step failure recovery chain (p. 206)
@@ -321,17 +325,6 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _get_pattern_assessments(record: dict) -> dict[str, dict]:
-    """Extract pattern assessments from consultation steps, keyed by pattern_id."""
-    assessments = {}
-    for step in record.get("steps", []):
-        if step.get("type") == "pattern_assessment":
-            pid = step.get("pattern_id")
-            if pid:
-                assessments[pid] = step
-    return assessments
-
 
 def _get_all_model_pattern_ids() -> set[str]:
     """All pattern IDs in MATURITY_MODEL."""

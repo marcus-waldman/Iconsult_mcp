@@ -8,8 +8,9 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
-- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`, `tools/implementation_plan.py`
+- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`, `tools/implementation_plan.py`, `tools/blackboard.py`, `tools/quality.py`
 - L4 modules: `access_policy.py` (tool access levels + consultation ownership validation)
+- Pattern ID aliasing: `_PATTERN_ID_ALIASES` in `score_architecture.py` bridges MATURITY_MODEL IDs ↔ KG concept IDs; `normalize_pattern_id()` resolves either to canonical form
 - Resilience: `escalation.py` (structured error responses), dispatch dict + timeout/retry in `server.py`
 - Developer docs: `docs/development.md`
 
@@ -25,7 +26,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - Integration tests in `tests/` — require MOTHERDUCK_TOKEN and OPENAI_API_KEY env vars
 - Test cases in `tests/cases.py` — 12 architectures derived from openai/openai-agents-python examples
 - Adding a test case = adding a dict to `CASES` in `tests/cases.py` (id, description, expected_concepts, pattern_assessments)
-- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_implementation_plan.py` (plan generation/tracking), `test_consultation_flow.py` (end-to-end)
+- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_implementation_plan.py` (plan generation/tracking), `test_consultation_flow.py` (end-to-end), `test_pattern_id_aliases.py` (pattern ID alias resolution), `test_blackboard.py` (blackboard knowledge hub)
 
 ## Environment Variables
 - `MOTHERDUCK_TOKEN` — required for database
@@ -39,7 +40,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 
 ## Database
 - MotherDuck database name: `Iconsult` (override with `ICONSULT_DB` env var)
-- 10 tables + 1 metadata table (see db.py schema); `consultations` table tracks reproducible sessions; `consultation_state` for shared epistemic memory; `consultation_events` for event-driven reactivity; `implementation_plans` for cross-session plan persistence
+- 12 tables + 1 metadata table (see db.py schema); `consultations` table tracks reproducible sessions; `consultation_state` for shared epistemic memory; `consultation_events` for event-driven reactivity; `implementation_plans` for cross-session plan persistence; `blackboard_facts` for typed, versioned scatter-gather coordination; `consultation_quality` for quality ratings and feedback
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
 
 ## MCP Tools
@@ -51,8 +52,8 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `consultation_report(consultation_id, compare_to?)` — COVERAGE CHECK: concept coverage (matched concepts that were traversed OR assessed), relationship type coverage, passage diversity, gap identification, cross-session diff
 - `log_pattern_assessment(consultation_id, pattern_id, pattern_name, status, evidence?, maturity_level?, failure_context?)` — LOG ASSESSMENT: record a pattern assessment during graph traversal; status is "implemented", "partial", "missing", or "not_applicable" (pattern irrelevant to this architecture); optional `failure_context` (dict with `code_refs`, `failure_mode`, `depends_on`) captures structured evidence for stress test demos; these feed into `score_architecture` and `generate_failure_scenarios`
 - `score_architecture(consultation_id, target_level?, roadmap_levels?)` — MATURITY SCORECARD: deterministic scoring from stored `pattern_assessment` steps; computes maturity level (L1-L6), pattern status with phase-aligned goals, gap analysis with severity, recommended metrics, implementation roadmap. `roadmap_levels` (default 3) controls how many levels the roadmap/goals cover. Each pattern gets a `phase` field (1-based) tying it to its implementation phase.
-- `validate_subagent(response)` — VALIDATE: schema validation for subagent JSON responses {concept, key_relationships, recommendation, discovered_ids}; pure structural checks, no LLM
-- `critique_consultation(consultation_id)` — CRITIQUE: deterministic quality critique of consultation steps; checks workflow completeness, traversal depth, assessment coverage, passage diversity, critical edges; returns issues with severity + `prompt_mutations` for adaptive retry
+- `validate_subagent(response, validate_against_graph?)` — VALIDATE: schema validation for subagent JSON responses {concept, key_relationships, recommendation, discovered_ids}; pure structural checks, no LLM; optional `validate_against_graph` verifies discovered_ids exist in concepts table and concept matches a known name (returns semantic_warnings separately)
+- `critique_consultation(consultation_id, max_iterations?)` — CRITIQUE: deterministic quality critique of consultation steps; checks workflow completeness, traversal depth, assessment coverage, passage diversity, critical edges; returns issues with severity + `prompt_mutations` for adaptive retry; `max_iterations` (1-3) enables multi-pass critique with convergence/stuck-loop detection
 - `write_state(consultation_id, key, value)` — SHARED STATE (write): upsert key-value pair for subagent coordination; logs state_write step
 - `read_state(consultation_id, key?)` — SHARED STATE (read): read one key or all entries from shared state
 - `emit_event(consultation_id, event_type, data?)` — EVENT (emit): emit consultation event (gap_found, pattern_assessed, coverage_threshold_reached, coverage_dropped, plan_created, state_conflict); returns reactive suggestion
@@ -63,6 +64,10 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `generate_implementation_plan(consultation_id, output_dir?)` — IMPLEMENTATION PLAN: generate phased markdown checklist from consultation results; classifies steps as "mechanical" (concrete code changes) or "design_decision" (architectural choices); writes markdown to disk, stores plan JSON in DuckDB for cross-session tracking
 - `get_implementation_plan(consultation_id)` — GET PLAN: retrieve previously generated plan with progress summary
 - `update_plan_step(consultation_id, step_id, status, notes?)` — UPDATE STEP: update step status (pending/in_progress/completed/skipped); recomputes summary, regenerates markdown
+- `assert_fact(consultation_id, fact_type, key, value, confidence?, agent_id?, ttl_seconds?)` — BLACKBOARD (assert): append typed, versioned fact (never overwrites); supports confidence scores and TTL
+- `query_facts(consultation_id, fact_type?, key?, min_confidence?, detect_conflicts?)` — BLACKBOARD (query): query facts with optional conflict detection and convergence summary
+- `rate_consultation(consultation_id, rating?, feedback?)` — QUALITY (rate): record user quality score (1-5) and/or feedback; snapshots consultation metadata
+- `consultation_analytics(limit?)` — QUALITY (analytics): surface quality trends across consultations (avg rating, coverage, pattern counts, distribution)
 
 ### Prompt
 - `consult(context)` — guided architecture consultation; interpolates user's project context into the full 7-step workflow

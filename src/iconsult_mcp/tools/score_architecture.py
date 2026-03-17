@@ -58,6 +58,46 @@ MATURITY_MODEL: dict[int, list[dict]] = {
 
 # Per-pattern recommended metrics from Ch. 7 (Table 7.2), Ch. 8 (Table 8.2),
 # Ch. 9 (Table 9.3). Only patterns with book-defined metrics are included.
+# ---------------------------------------------------------------------------
+# Pattern ID aliases — bridge between MATURITY_MODEL IDs and Knowledge Graph IDs
+# The KG uses shorter concept IDs; the maturity model uses longer descriptive IDs.
+# This map lets assessments logged with *either* convention match correctly.
+# ---------------------------------------------------------------------------
+
+_PATTERN_ID_ALIASES: dict[str, str] = {
+    # MATURITY_MODEL ID -> KG concept ID
+    "single_agent_baseline_pattern": "single_agent_baseline",
+    "function_calling_pattern": "function_calling",
+    "watchdog_timeout_pattern": "watchdog_timeout",
+    "agent_calls_human_pattern": "agent_calls_human",
+    "agent_router_pattern": "agent_router",
+    "tool_use_pattern": "dynamic_tool_selection",
+    "adaptive_retry_pattern": "simple_retry",
+    "structured_reasoning_and_self": "react_reflexion",
+    "instruction_fidelity_auditing_pattern": "instruction_fidelity_auditing",
+    "adaptive_retry_with_prompt_mutation": "adaptive_retry",
+}
+
+# Build reverse map (KG ID -> MATURITY_MODEL ID)
+_PATTERN_ID_ALIASES_REVERSE: dict[str, str] = {v: k for k, v in _PATTERN_ID_ALIASES.items()}
+
+# Combined: look up from either direction
+_PATTERN_ID_ALIAS_COMBINED: dict[str, str] = {**_PATTERN_ID_ALIASES, **_PATTERN_ID_ALIASES_REVERSE}
+
+
+def normalize_pattern_id(pid: str) -> str:
+    """Return the canonical (MATURITY_MODEL) ID for a pattern, resolving aliases.
+
+    If pid is already a MATURITY_MODEL ID, returns it unchanged.
+    If pid is a KG alias, returns the corresponding MATURITY_MODEL ID.
+    If pid is unknown, returns it unchanged.
+    """
+    # If it's a KG alias, map to MATURITY_MODEL ID
+    if pid in _PATTERN_ID_ALIASES_REVERSE:
+        return _PATTERN_ID_ALIASES_REVERSE[pid]
+    return pid
+
+
 PATTERN_METRICS: dict[str, dict] = {
     # Ch. 9 — Agent-level
     "single_agent_baseline_pattern": {
@@ -149,13 +189,21 @@ PATTERN_METRICS: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 def _get_pattern_assessments(record: dict) -> dict[str, dict]:
-    """Extract pattern assessments from consultation steps, keyed by pattern_id."""
+    """Extract pattern assessments from consultation steps, keyed by pattern_id.
+
+    Stores each assessment under both its original ID and any alias so that
+    lookups by either MATURITY_MODEL ID or KG concept ID succeed.
+    """
     assessments = {}
     for step in record.get("steps", []):
         if step.get("type") == "pattern_assessment":
             pid = step.get("pattern_id")
             if pid:
                 assessments[pid] = step
+                # Also store under alias (if any) so lookups work from either direction
+                alias = _PATTERN_ID_ALIAS_COMBINED.get(pid)
+                if alias and alias not in assessments:
+                    assessments[alias] = step
     return assessments
 
 

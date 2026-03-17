@@ -36,61 +36,106 @@ ALL_RELATIONSHIP_TYPES = {
 CRITICAL_EDGE_TYPES = {"requires", "conflicts_with"}
 
 
-async def critique_consultation(consultation_id: str) -> dict:
+async def critique_consultation(
+    consultation_id: str,
+    max_iterations: int = 1,
+) -> dict:
     """Produce a deterministic critique of a consultation session.
+
+    Supports multi-iteration mode: when max_iterations > 1, the critique is
+    run multiple times against the same consultation. Each iteration re-reads
+    the consultation steps (which may have been updated by executing mutations
+    between calls). Stops early if converged (no new errors, coverage improvement
+    < 5%) or stuck (identical mutations generated twice).
 
     Args:
         consultation_id: The consultation session to critique.
+        max_iterations: Number of critique iterations (1-3, default 1).
 
     Returns:
-        Dict with issues (list of findings), summary stats, and suggestions.
+        Dict with issues, summary stats, and suggestions. Multi-iteration mode
+        adds iteration_count and convergence_reason.
     """
-    record = get_consultation(consultation_id)
-    if not record:
-        return {"error": f"Consultation '{consultation_id}' not found"}
+    max_iterations = max(1, min(3, max_iterations))
 
-    steps = record["steps"]
-    matched_ids = set(record["matched_concept_ids"])
+    prev_severity_counts: dict = {}
+    prev_mutations_key: str | None = None
+    prev_coverage: float = 0.0
+    iteration_results: list[dict] = []
 
-    issues: list[dict] = []
-    stats = _compute_stats(steps, matched_ids)
+    final_result: dict = {}
 
-    # Check workflow completeness
-    _check_workflow(steps, issues)
+    for iteration in range(max_iterations):
+        record = get_consultation(consultation_id)
+        if not record:
+            return {"error": f"Consultation '{consultation_id}' not found"}
 
-    # Check traversal depth
-    _check_traversals(stats, issues)
+        steps = record["steps"]
+        matched_ids = set(record["matched_concept_ids"])
 
-    # Check pattern assessments
-    _check_assessments(stats, issues)
+        issues: list[dict] = []
+        stats = _compute_stats(steps, matched_ids)
 
-    # Check passage retrieval
-    _check_passages(stats, issues)
+        # Check workflow completeness
+        _check_workflow(steps, issues)
+        _check_traversals(stats, issues)
+        _check_assessments(stats, issues)
+        _check_passages(stats, issues)
+        _check_coverage(stats, issues)
+        _check_critical_edges(stats, issues)
+        _check_failure_scenarios(stats, issues)
 
-    # Check coverage thresholds
-    _check_coverage(stats, issues)
+        severity_counts: dict = {}
+        for issue in issues:
+            sev = issue["severity"]
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
 
-    # Check critical edges
-    _check_critical_edges(stats, issues)
+        mutations = _build_prompt_mutations(issues, stats)
 
-    # Check failure scenarios
-    _check_failure_scenarios(stats, issues)
+        result = {
+            "consultation_id": consultation_id,
+            "issue_count": len(issues),
+            "severity_counts": severity_counts,
+            "issues": issues,
+            "stats": stats,
+            "prompt_mutations": mutations,
+        }
+        iteration_results.append(result)
+        final_result = result
 
-    severity_counts = {}
-    for issue in issues:
-        sev = issue["severity"]
-        severity_counts[sev] = severity_counts.get(sev, 0) + 1
+        # Single iteration mode — return immediately
+        if max_iterations == 1:
+            return result
 
-    mutations = _build_prompt_mutations(issues, stats)
+        # Convergence check: no new errors and coverage improvement < 5%
+        current_errors = severity_counts.get("error", 0)
+        prev_errors = prev_severity_counts.get("error", 0)
+        current_coverage = stats.get("concept_coverage", 0.0)
+        coverage_delta = current_coverage - prev_coverage
 
-    return {
-        "consultation_id": consultation_id,
-        "issue_count": len(issues),
-        "severity_counts": severity_counts,
-        "issues": issues,
-        "stats": stats,
-        "prompt_mutations": mutations,
-    }
+        if iteration > 0 and current_errors == 0 and coverage_delta < 0.05:
+            final_result["convergence_reason"] = "converged"
+            break
+
+        # Stuck-loop detection: identical mutations generated twice
+        mutations_key = str(sorted(
+            (m["action"], str(sorted(m["params"].items())) if isinstance(m["params"], dict) else str(m["params"]))
+            for m in mutations
+        ))
+        if mutations_key == prev_mutations_key:
+            final_result["convergence_reason"] = "stuck_loop"
+            break
+
+        prev_severity_counts = severity_counts
+        prev_mutations_key = mutations_key
+        prev_coverage = current_coverage
+
+    if max_iterations > 1:
+        final_result["iteration_count"] = len(iteration_results)
+        if "convergence_reason" not in final_result:
+            final_result["convergence_reason"] = "max_iterations_reached"
+
+    return final_result
 
 
 def _compute_stats(steps: list[dict], matched_ids: set[str]) -> dict:

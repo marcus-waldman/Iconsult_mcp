@@ -40,6 +40,8 @@ from iconsult_mcp.tools.implementation_plan import (
     get_implementation_plan as get_impl_plan,
     update_plan_step,
 )
+from iconsult_mcp.tools.blackboard import assert_fact, query_facts
+from iconsult_mcp.tools.quality import rate_consultation, consultation_analytics
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -66,6 +68,10 @@ TOOL_METADATA = {
     "generate_implementation_plan": {"timeout": 15, "retryable": False, "category": "consultation", "access_level": "write"},
     "get_implementation_plan": {"timeout": 10, "retryable": False, "category": "consultation", "access_level": "read"},
     "update_plan_step": {"timeout": 10, "retryable": False, "category": "consultation", "access_level": "write"},
+    "assert_fact": {"timeout": 10, "retryable": False, "category": "coordination", "access_level": "write"},
+    "query_facts": {"timeout": 10, "retryable": False, "category": "coordination", "access_level": "read"},
+    "rate_consultation": {"timeout": 10, "retryable": False, "category": "quality", "access_level": "write"},
+    "consultation_analytics": {"timeout": 10, "retryable": False, "category": "quality", "access_level": "read"},
 }
 
 # Dispatch table: tool name → handler(arguments) → coroutine
@@ -114,14 +120,17 @@ TOOL_DISPATCH = {
     ),
     "validate_subagent": lambda args: validate_subagent(
         response=args.get("response", {}),
+        validate_against_graph=args.get("validate_against_graph", False),
     ),
     "critique_consultation": lambda args: critique_consultation(
         consultation_id=args.get("consultation_id", ""),
+        max_iterations=args.get("max_iterations", 1),
     ),
     "write_state": lambda args: write_state(
         consultation_id=args.get("consultation_id", ""),
         key=args.get("key", ""),
         value=args.get("value"),
+        agent_id=args.get("agent_id"),
     ),
     "read_state": lambda args: read_state(
         consultation_id=args.get("consultation_id", ""),
@@ -159,6 +168,30 @@ TOOL_DISPATCH = {
         step_id=args.get("step_id", ""),
         status=args.get("status", ""),
         notes=args.get("notes", ""),
+    ),
+    "assert_fact": lambda args: assert_fact(
+        consultation_id=args.get("consultation_id", ""),
+        fact_type=args.get("fact_type", ""),
+        key=args.get("key", ""),
+        value=args.get("value"),
+        confidence=args.get("confidence", 1.0),
+        agent_id=args.get("agent_id"),
+        ttl_seconds=args.get("ttl_seconds"),
+    ),
+    "query_facts": lambda args: query_facts(
+        consultation_id=args.get("consultation_id", ""),
+        fact_type=args.get("fact_type"),
+        key=args.get("key"),
+        min_confidence=args.get("min_confidence"),
+        detect_conflicts=args.get("detect_conflicts", False),
+    ),
+    "rate_consultation": lambda args: rate_consultation(
+        consultation_id=args.get("consultation_id", ""),
+        rating=args.get("rating"),
+        feedback=args.get("feedback"),
+    ),
+    "consultation_analytics": lambda args: consultation_analytics(
+        limit=args.get("limit", 20),
     ),
 }
 
@@ -229,8 +262,11 @@ api.call()"}], "failure_mode": "No retry logic, API failures propagate to orches
    Then narrate in 1-2 sentences: the single most significant finding — a \
 prerequisite to strengthen, a conflict to address, or an alternative worth exploring.
 
-   **Shared state:** Use `write_state` and `read_state` to coordinate between \
-subagents — e.g., store discovered concept IDs, current phase, or conflict markers. \
+   **Shared state:** Use `assert_fact` and `query_facts` (Blackboard Knowledge Hub) for \
+typed, versioned subagent coordination — e.g., assert discovered concept IDs, pattern \
+findings, or recommendations with confidence scores. Use `query_facts` with \
+`detect_conflicts=true` to find disagreements between subagents. Legacy `write_state` \
+and `read_state` still work for simple key-value needs. \
 Use `emit_event` to signal discoveries (e.g., `gap_found` when an opportunity for \
 a key pattern is identified) and `get_events` to poll for reactive suggestions.
 
@@ -621,6 +657,10 @@ async def list_tools() -> list[Tool]:
                         "type": "object",
                         "description": "The JSON object returned by a graph-analysis subagent",
                     },
+                    "validate_against_graph": {
+                        "type": "boolean",
+                        "description": "Also verify discovered_ids and concept against the knowledge graph (default false)",
+                    },
                 },
                 "required": ["response"],
             },
@@ -640,6 +680,10 @@ async def list_tools() -> list[Tool]:
                     "consultation_id": {
                         "type": "string",
                         "description": "The consultation session to critique",
+                    },
+                    "max_iterations": {
+                        "type": "integer",
+                        "description": "Number of critique iterations (1-3, default 1). Stops early if converged or stuck.",
                     },
                 },
                 "required": ["consultation_id"],
@@ -666,6 +710,10 @@ async def list_tools() -> list[Tool]:
                     },
                     "value": {
                         "description": "Any JSON-serializable value to store",
+                    },
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Optional agent identifier; when provided, also bridges to blackboard",
                     },
                 },
                 "required": ["consultation_id", "key", "value"],
@@ -890,6 +938,125 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["consultation_id", "step_id", "status"],
+            },
+        ),
+        Tool(
+            name="assert_fact",
+            description=(
+                "BLACKBOARD (assert) — Assert a typed, versioned fact on the blackboard. "
+                "Append-only (never overwrites). Multiple agents can assert different values "
+                "for the same key. Use query_facts with detect_conflicts to find disagreements."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session",
+                    },
+                    "fact_type": {
+                        "type": "string",
+                        "description": "Category of fact (e.g., 'concept_finding', 'pattern_status', 'recommendation')",
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "Fact key (e.g., a concept ID or pattern ID)",
+                    },
+                    "value": {
+                        "description": "Arbitrary JSON-serializable value",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Confidence score 0.0-1.0 (default 1.0)",
+                    },
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Identifier of the subagent asserting this fact",
+                    },
+                    "ttl_seconds": {
+                        "type": "integer",
+                        "description": "Optional time-to-live in seconds",
+                    },
+                },
+                "required": ["consultation_id", "fact_type", "key", "value"],
+            },
+        ),
+        Tool(
+            name="query_facts",
+            description=(
+                "BLACKBOARD (query) — Query facts from the blackboard with optional filters. "
+                "Supports conflict detection (different agents asserting different values for "
+                "the same key) and convergence summary."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session",
+                    },
+                    "fact_type": {
+                        "type": "string",
+                        "description": "Filter by fact type",
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "Filter by key",
+                    },
+                    "min_confidence": {
+                        "type": "number",
+                        "description": "Minimum confidence threshold",
+                    },
+                    "detect_conflicts": {
+                        "type": "boolean",
+                        "description": "Include conflict detection and convergence summary (default false)",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
+        Tool(
+            name="rate_consultation",
+            description=(
+                "QUALITY (rate) — Rate a consultation's quality with a 1-5 score and/or "
+                "free-text feedback. Automatically snapshots consultation metadata for trend analysis."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session to rate",
+                    },
+                    "rating": {
+                        "type": "integer",
+                        "description": "Quality score 1-5",
+                        "minimum": 1,
+                        "maximum": 5,
+                    },
+                    "feedback": {
+                        "type": "string",
+                        "description": "Free-text feedback about the consultation",
+                    },
+                },
+                "required": ["consultation_id"],
+            },
+        ),
+        Tool(
+            name="consultation_analytics",
+            description=(
+                "QUALITY (analytics) — Surface quality trends across consultations. "
+                "Returns recent ratings with aggregate statistics (average rating, coverage, "
+                "pattern counts, rating distribution)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of recent ratings to return (default 20)",
+                    },
+                },
             },
         ),
     ]

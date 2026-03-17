@@ -9,6 +9,7 @@ from iconsult_mcp.db import (
     log_consultation_step,
     read_shared_state as db_read_state,
     write_shared_state as db_write_state,
+    assert_blackboard_fact,
 )
 
 
@@ -16,15 +17,18 @@ async def write_state(
     consultation_id: str,
     key: str,
     value: object,
+    agent_id: str | None = None,
 ) -> dict:
     """Write a key-value pair to consultation shared state.
 
     Upserts: creates or updates the entry. Logs a step to the consultation.
+    When agent_id is provided, also writes to the blackboard for backward compat.
 
     Args:
         consultation_id: The consultation session ID.
         key: State key (e.g. 'discovered_concepts', 'current_phase').
         value: Any JSON-serializable value.
+        agent_id: Optional agent identifier; when provided, also bridges to blackboard.
     """
     if not consultation_id or not consultation_id.strip():
         return {"error": "consultation_id is required"}
@@ -37,8 +41,19 @@ async def write_state(
 
     db_write_state(consultation_id, key, value)
 
+    # Bridge to blackboard when agent_id is provided
+    if agent_id:
+        assert_blackboard_fact(
+            consultation_id=consultation_id,
+            fact_type="shared_state",
+            key=key,
+            value=value,
+            agent_id=agent_id,
+        )
+
     log_consultation_step(consultation_id, "state_write", {
         "key": key,
+        "agent_id": agent_id,
     })
 
     return {

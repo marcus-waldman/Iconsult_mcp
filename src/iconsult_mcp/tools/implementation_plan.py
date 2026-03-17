@@ -34,6 +34,10 @@ MECHANICAL_PATTERN_IDS = frozenset({
     "function_calling_pattern",
     "auto_healing_pattern",
     "fallback_model_invocation_pattern",
+    # KG aliases for the above
+    "simple_retry",
+    "watchdog_timeout",
+    "function_calling",
 })
 
 DESIGN_DECISION_MIN_LEVEL = 4

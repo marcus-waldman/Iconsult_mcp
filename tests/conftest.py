@@ -49,6 +49,14 @@ def consultation_cleanup():
         except Exception:
             pass
         try:
+            conn.execute("DELETE FROM consultation_quality WHERE consultation_id = ?", [cid])
+        except Exception:
+            pass
+        try:
+            conn.execute("DELETE FROM blackboard_facts WHERE consultation_id = ?", [cid])
+        except Exception:
+            pass
+        try:
             conn.execute("DELETE FROM consultation_state WHERE consultation_id = ?", [cid])
         except Exception:
             pass

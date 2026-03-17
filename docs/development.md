@@ -18,14 +18,17 @@ src/iconsult_mcp/
     ask_book.py            RAG search with suggested questions + consultation logging
     consultation_report.py Coverage metrics + cross-session comparison
     log_pattern_assessment.py  Log pattern assessments for scoring
-    score_architecture.py  Deterministic maturity scoring
-    validate_subagent.py   Schema validation for subagent responses
-    critique_consultation.py  Deterministic quality critique + prompt mutations
+    score_architecture.py  Deterministic maturity scoring + pattern ID aliases
+    validate_subagent.py   Schema + optional semantic validation for subagent responses
+    critique_consultation.py  Deterministic quality critique + prompt mutations (multi-iteration)
     shared_state.py        Shared epistemic memory (write/read key-value state)
     events.py              Event-driven reactivity (emit/poll events)
     plan_consultation.py   Adaptive consultation planning
     supervise_consultation.py  Workflow supervisor (progress + next action)
     failure_scenarios.py       Stress test failure scenario generation
+    implementation_plan.py     Phased implementation plan generation + tracking
+    blackboard.py              Typed, versioned fact store for scatter-gather coordination
+    quality.py                 Consultation quality ratings + analytics
 
 tests/
   cases.py           Test case definitions (12 OpenAI agent examples)
@@ -39,6 +42,9 @@ tests/
   test_plan_consultation.py   Adaptive planning
   test_failure_scenarios.py       Stress test failure scenario generation
   test_supervise_consultation.py  Supervisor progress
+  test_implementation_plan.py     Plan generation + step tracking
+  test_pattern_id_aliases.py      Pattern ID alias resolution (KG ↔ maturity model)
+  test_blackboard.py              Blackboard facts, conflicts, TTL, convergence
 
 scripts/
   run_pipeline.py    Pipeline orchestrator
@@ -66,9 +72,13 @@ literature/
 ## Database
 
 - MotherDuck database name: `iconsult` (override with `ICONSULT_DB` env var)
-- 9 tables + 1 metadata table (see `db.py` for schema)
+- 12 tables + 1 metadata table (see `db.py` for schema)
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
 - `consultations` table tracks reproducible consultation sessions (fingerprint, matched concepts, step log)
+- `consultation_state` for shared epistemic memory; `consultation_events` for event-driven reactivity
+- `implementation_plans` for cross-session plan persistence
+- `blackboard_facts` for typed, versioned scatter-gather coordination (append-only, with confidence + TTL)
+- `consultation_quality` for quality ratings and feedback
 - Scripts use `INSERT OR REPLACE` which DuckDB supports
 
 ## Pipeline
@@ -124,15 +134,22 @@ py scripts/run_pipeline.py --reset      # Clear everything and start over
 | `consultation_report` | Coverage check | Concept coverage = matched concepts that were either traversed (get_subgraph) or assessed (log_pattern_assessment); also shows relationship type coverage, passage diversity, prerequisite/conflict checks, gap list; optionally diffs two sessions with same fingerprint |
 | `log_pattern_assessment` | **Log assessment** | Records a pattern assessment (implemented/partial/missing/not_applicable) to a consultation's step log; call during graph traversal for each pattern found/missing; use `not_applicable` for patterns irrelevant to the architecture (e.g., Agent Calls Human for batch pipelines); feeds into `score_architecture` |
 | `score_architecture` | **Maturity scorecard** | Deterministic scoring from stored `pattern_assessment` steps; computes maturity level (L1-L6), phase-aligned pattern status with goals, gap analysis with severity, recommended metrics from Ch. 7/8/9, implementation roadmap; `roadmap_levels` (default 3) controls how many levels the roadmap/goals cover; each pattern gets a `phase` field tying it to its implementation phase; N/A patterns don't block level progression; same consultation always produces same results |
-| `validate_subagent` | Validation | Schema validation for subagent JSON responses (`concept`, `key_relationships`, `recommendation`, `discovered_ids`); returns `valid`, `errors`, `warnings`; no LLM calls |
-| `critique_consultation` | **Quality critique** | Deterministic critique of consultation steps; checks workflow completeness, traversal depth, pattern assessment count, passage retrieval, concept/rel-type coverage, critical edges; returns `issues` (severity + category + suggestion) and `prompt_mutations` (concrete tool calls to address gaps); cap reflection loop at 1 iteration |
-| `write_state` | **Shared state (write)** | Upsert key-value pair in consultation shared state for subagent coordination; logs `state_write` step |
+| `validate_subagent` | Validation | Schema validation for subagent JSON responses; optional `validate_against_graph` checks discovered_ids and concept against the KG (returns `semantic_warnings` separately); no LLM calls |
+| `critique_consultation` | **Quality critique** | Deterministic critique of consultation steps; checks workflow completeness, traversal depth, pattern assessment count, passage retrieval, concept/rel-type coverage, critical edges; returns `issues` and `prompt_mutations`; `max_iterations` (1-3) enables multi-pass critique with convergence and stuck-loop detection |
+| `write_state` | **Shared state (write)** | Upsert key-value pair in consultation shared state; optional `agent_id` also bridges to blackboard |
 | `read_state` | **Shared state (read)** | Read one key or all entries from consultation shared state |
 | `emit_event` | **Event (emit)** | Emit consultation event (`gap_found`, `pattern_assessed`, `coverage_threshold_reached`, `coverage_dropped`, `plan_created`, `state_conflict`); returns reactive suggestion |
 | `get_events` | **Event (poll)** | Poll consultation events with optional `since_id` and `event_type` filters |
 | `plan_consultation` | **Adaptive planning** | Assess complexity (simple/moderate/complex) from concept count, keywords, relationship density; generate adaptive step-by-step plan; logs `plan_created` step |
 | `supervise_consultation` | **Workflow supervisor** | Track workflow phases (completed/remaining), compute progress percent, suggest next action with tool + params, include event alerts and shared state |
 | `generate_failure_scenarios` | **Stress test** | Deterministic failure scenario walkthroughs for missing/partial patterns; cascading failure traces with code refs (code-grounded) or book templates (book-grounded); Ch. 7 five-step failure chain mapping; inverted pyramid detection |
+| `generate_implementation_plan` | **Implementation plan** | Generate phased markdown checklist from consultation results; classifies steps as "mechanical" or "design_decision"; writes markdown to disk, stores plan in DuckDB |
+| `get_implementation_plan` | **Get plan** | Retrieve a previously generated implementation plan with progress summary |
+| `update_plan_step` | **Update step** | Update step status (pending/in_progress/completed/skipped); recomputes summary, regenerates markdown |
+| `assert_fact` | **Blackboard (assert)** | Append typed, versioned fact (never overwrites); supports confidence scores, agent_id, and TTL |
+| `query_facts` | **Blackboard (query)** | Query facts with optional filters; `detect_conflicts` finds disagreements between agents; convergence summary |
+| `rate_consultation` | **Quality (rate)** | Record user quality score (1-5) and/or feedback; snapshots consultation metadata |
+| `consultation_analytics` | **Quality (analytics)** | Surface quality trends across consultations (avg rating, coverage, pattern counts, distribution) |
 
 ### Reproducible Consultations
 
@@ -144,18 +161,21 @@ The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report`
 4. **Cross-session comparison** — `consultation_report(id, compare_to=other_id)` diffs two sessions with the same fingerprint to show concept overlap, coverage deltas, and relationship type differences.
 5. **Canonical questions** — `ask_book` returns `suggested_questions` generated from graph edge templates (e.g., "What are the prerequisites for X and how does Y fulfill them?"), reducing question formulation variance.
 6. **Pattern assessments** — `log_pattern_assessment` records whether each pattern is implemented, partial, missing, or not_applicable in the user's codebase. Use `not_applicable` for patterns irrelevant to the architecture (e.g., Agent Calls Human for a batch pipeline). Call it during graph traversal (step 3) for every pattern identified. Optional `failure_context` captures structured code refs and failure modes for stress test demos.
-7. **Deterministic scoring** — `score_architecture` reads stored `pattern_assessment` steps and computes maturity level, phase-aligned pattern status with goals, and gap analysis using fixed formulas. N/A patterns don't block level progression. `roadmap_levels` (default 3) controls how many maturity levels the roadmap and Goal column cover. Each pattern gets a `phase` field (1-based) tying it to its implementation phase. No LLM involved in scoring — same assessments always produce same results.
+7. **Deterministic scoring** — `score_architecture` reads stored `pattern_assessment` steps and computes maturity level, phase-aligned pattern status with goals, and gap analysis using fixed formulas. Pattern ID aliases (`_PATTERN_ID_ALIASES`) bridge KG concept IDs to maturity model IDs so assessments logged with either convention are found. N/A patterns don't block level progression. `roadmap_levels` (default 3) controls how many maturity levels the roadmap and Goal column cover. Each pattern gets a `phase` field (1-based) tying it to its implementation phase. No LLM involved in scoring — same assessments always produce same results.
+8. **Implementation plans** — `generate_implementation_plan` builds a phased checklist from gap analysis, classifying each step as "mechanical" (concrete code change) or "design_decision" (architectural choice). Plans persist in DuckDB for cross-session tracking via `get_implementation_plan` and `update_plan_step`.
+9. **Quality feedback loop** — `rate_consultation` captures user satisfaction (1-5) with metadata snapshots. `consultation_analytics` surfaces trends across consultations.
 
-### Consulting Workflow (6 steps)
+### Consulting Workflow (7 steps)
 
 1. **READ PROJECT** — Read the user's codebase
 2. **MATCH CONCEPTS** — `match_concepts` with project description → concept ranking + `consultation_id`
 2b. **PLAN** — `plan_consultation` to assess complexity and generate adaptive plan; optionally `supervise_consultation` after each step
-3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents; call `log_pattern_assessment` for each pattern; use `write_state`/`read_state` for subagent coordination; use `emit_event` for gap discovery
+3. **TRAVERSE GRAPH** — `get_subgraph` per seed concept with `consultation_id`; scatter-gather via subagents; call `log_pattern_assessment` for each pattern; use `assert_fact`/`query_facts` (blackboard) or `write_state`/`read_state` for coordination; use `emit_event` for gap discovery
 4. **RETRIEVE PASSAGES** — `ask_book` scoped to discovered concepts with `consultation_id`; follow `suggested_questions`
 5. **CHECK COVERAGE + SCORE + STRESS TEST** — `consultation_report` to verify gaps; `score_architecture` for maturity scorecard with current status and goals; `generate_failure_scenarios` for concrete failure walkthroughs
-5b. **CRITIQUE (optional)** — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address gaps; cap at 1 iteration
+5b. **CRITIQUE (optional)** — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address gaps; `max_iterations` (1-3) for multi-pass with convergence detection
 6. **SYNTHESIZE** — Render entire consultation as a single HTML page via `/generate-web-diagram`. HTML sections in order: (a) Executive Brief callout for decision makers, (b) Maturity banner (current → target), (c) System Under Review with agent roster, (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail + book ref), (e) Before/After Mermaid diagrams (red gaps / green additions), (f) Implementation Recommendation cards by phase with code snippets + citations, (g) Failure Recovery Chain, (h) Stress Test: Failure Scenarios (collapsible cascading failure traces, Ch. 7 chain coverage, inverted pyramid warnings). Also check prerequisite/conflict edges; comparison tables as HTML when 4+ rows
+7. **OFFER IMPLEMENTATION PLAN** — ask user if they want a step-by-step plan; if yes, `generate_implementation_plan`; recommend fresh conversation for implementation using `get_implementation_plan` + `update_plan_step`
 
 ## Testing
 
@@ -227,6 +247,9 @@ All parameterized tests automatically pick up new cases. To find valid concept I
 | `test_plan_consultation.py` | Simple/moderate/complex plans, step logging, complexity assessment |
 | `test_failure_scenarios.py` | Scenario structure, determinism, empty case, code evidence, failure chain, severity ordering, max cap |
 | `test_supervise_consultation.py` | Empty/partial/complete progress, event alerts, shared state |
+| `test_implementation_plan.py` | Plan structure, phase matching, step classification (mechanical/design_decision), ordering, markdown output, step updates, determinism |
+| `test_pattern_id_aliases.py` | KG↔maturity model ID resolution, bidirectional aliases, normalize_pattern_id, maturity computation with KG IDs, failure chain/template coverage |
+| `test_blackboard.py` | Assert/query facts, append-only versioning, conflict detection, convergence status, TTL expiry, confidence filtering, shared_state bridge |
 
 ## Resilience
 

@@ -254,6 +254,38 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
+    # --- consultation_quality: quality ratings and feedback ---
+    conn.execute("CREATE SEQUENCE IF NOT EXISTS consultation_quality_id_seq")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS consultation_quality (
+            id INTEGER PRIMARY KEY DEFAULT nextval('consultation_quality_id_seq'),
+            consultation_id VARCHAR NOT NULL,
+            rating INTEGER,
+            feedback TEXT,
+            concept_coverage FLOAT,
+            pattern_count INTEGER,
+            maturity_level INTEGER,
+            created_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+
+    # --- blackboard_facts: typed, versioned facts for scatter-gather coordination ---
+    conn.execute("CREATE SEQUENCE IF NOT EXISTS blackboard_facts_id_seq")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS blackboard_facts (
+            id INTEGER PRIMARY KEY DEFAULT nextval('blackboard_facts_id_seq'),
+            consultation_id VARCHAR NOT NULL,
+            fact_type VARCHAR NOT NULL,
+            key VARCHAR NOT NULL,
+            value_json JSON,
+            confidence FLOAT DEFAULT 1.0,
+            agent_id VARCHAR,
+            version INTEGER DEFAULT 1,
+            expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+
     logger.info("Schema initialized successfully")
 
 
@@ -912,3 +944,247 @@ def delete_implementation_plan(consultation_id: str) -> None:
         "DELETE FROM implementation_plans WHERE consultation_id = ?",
         [consultation_id],
     )
+
+
+# --- Blackboard fact helpers ---
+
+
+def assert_blackboard_fact(
+    consultation_id: str,
+    fact_type: str,
+    key: str,
+    value: object,
+    confidence: float = 1.0,
+    agent_id: str | None = None,
+    ttl_seconds: int | None = None,
+) -> int:
+    """Append a fact to the blackboard (never overwrites). Returns the fact ID.
+
+    Args:
+        consultation_id: The consultation session.
+        fact_type: Category of fact (e.g., 'concept_finding', 'pattern_assessment').
+        key: Fact key (e.g., a concept ID or pattern ID).
+        value: Arbitrary JSON-serializable value.
+        confidence: Confidence score 0.0-1.0 (default 1.0).
+        agent_id: Optional identifier of the subagent that asserted this fact.
+        ttl_seconds: Optional time-to-live in seconds from now.
+    """
+    import json as _json
+    from datetime import datetime, timezone, timedelta
+
+    conn = get_connection()
+
+    # Compute next version for this (consultation_id, key, agent_id)
+    existing = conn.execute(
+        """SELECT COALESCE(MAX(version), 0) FROM blackboard_facts
+           WHERE consultation_id = ? AND key = ? AND agent_id IS NOT DISTINCT FROM ?""",
+        [consultation_id, key, agent_id],
+    ).fetchone()
+    next_version = (existing[0] if existing else 0) + 1
+
+    expires_at = None
+    if ttl_seconds is not None:
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+
+    row = conn.execute(
+        """INSERT INTO blackboard_facts
+           (consultation_id, fact_type, key, value_json, confidence, agent_id, version, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           RETURNING id""",
+        [consultation_id, fact_type, key, _json.dumps(value), confidence,
+         agent_id, next_version, expires_at],
+    ).fetchone()
+    return row[0]
+
+
+def query_blackboard_facts(
+    consultation_id: str,
+    fact_type: str | None = None,
+    key: str | None = None,
+    min_confidence: float | None = None,
+    include_expired: bool = False,
+) -> list[dict]:
+    """Query facts from the blackboard.
+
+    Args:
+        consultation_id: The consultation session.
+        fact_type: Filter by fact type (optional).
+        key: Filter by key (optional).
+        min_confidence: Minimum confidence threshold (optional).
+        include_expired: Include facts past their TTL (default False).
+    """
+    import json as _json
+
+    conn = get_connection()
+    query = "SELECT id, fact_type, key, value_json, confidence, agent_id, version, expires_at, created_at FROM blackboard_facts WHERE consultation_id = ?"
+    params: list = [consultation_id]
+
+    if fact_type is not None:
+        query += " AND fact_type = ?"
+        params.append(fact_type)
+    if key is not None:
+        query += " AND key = ?"
+        params.append(key)
+    if min_confidence is not None:
+        query += " AND confidence >= ?"
+        params.append(min_confidence)
+    if not include_expired:
+        query += " AND (expires_at IS NULL OR expires_at > current_timestamp)"
+
+    query += " ORDER BY created_at ASC"
+    rows = conn.execute(query, params).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "fact_type": r[1],
+            "key": r[2],
+            "value": _json.loads(r[3]) if r[3] else None,
+            "confidence": r[4],
+            "agent_id": r[5],
+            "version": r[6],
+            "expires_at": str(r[7]) if r[7] else None,
+            "created_at": str(r[8]),
+        }
+        for r in rows
+    ]
+
+
+def get_fact_conflicts(
+    consultation_id: str,
+    key: str,
+) -> list[dict]:
+    """Detect conflicting facts for a given key (different values from different agents).
+
+    Returns groups of facts that have the same key but different values,
+    each asserted by a different agent.
+    """
+    import json as _json
+
+    conn = get_connection()
+    # Get the latest version per agent for this key
+    rows = conn.execute(
+        """SELECT bf.id, bf.fact_type, bf.key, bf.value_json, bf.confidence,
+                  bf.agent_id, bf.version, bf.created_at
+           FROM blackboard_facts bf
+           INNER JOIN (
+               SELECT agent_id, MAX(version) as max_ver
+               FROM blackboard_facts
+               WHERE consultation_id = ? AND key = ?
+                 AND (expires_at IS NULL OR expires_at > current_timestamp)
+               GROUP BY agent_id
+           ) latest ON bf.agent_id IS NOT DISTINCT FROM latest.agent_id
+                    AND bf.version = latest.max_ver
+           WHERE bf.consultation_id = ? AND bf.key = ?
+             AND (bf.expires_at IS NULL OR bf.expires_at > current_timestamp)
+           ORDER BY bf.confidence DESC""",
+        [consultation_id, key, consultation_id, key],
+    ).fetchall()
+
+    facts = [
+        {
+            "id": r[0],
+            "fact_type": r[1],
+            "key": r[2],
+            "value": _json.loads(r[3]) if r[3] else None,
+            "confidence": r[4],
+            "agent_id": r[5],
+            "version": r[6],
+            "created_at": str(r[7]),
+        }
+        for r in rows
+    ]
+
+    # Check if there are different values
+    values_seen = set()
+    for f in facts:
+        values_seen.add(_json.dumps(f["value"], sort_keys=True))
+
+    return facts if len(values_seen) > 1 else []
+
+
+def get_convergence_status(
+    consultation_id: str,
+) -> dict:
+    """Check how many facts have converged (single value) vs. conflicting.
+
+    Returns:
+        Dict with total_keys, converged_keys, conflicting_keys, and convergence_pct.
+    """
+    import json as _json
+
+    conn = get_connection()
+    # Get all unique keys
+    keys = conn.execute(
+        """SELECT DISTINCT key FROM blackboard_facts
+           WHERE consultation_id = ?
+             AND (expires_at IS NULL OR expires_at > current_timestamp)""",
+        [consultation_id],
+    ).fetchall()
+
+    total_keys = len(keys)
+    conflicting = 0
+
+    for (key,) in keys:
+        conflicts = get_fact_conflicts(consultation_id, key)
+        if conflicts:
+            conflicting += 1
+
+    converged = total_keys - conflicting
+    pct = int((converged / total_keys) * 100) if total_keys > 0 else 100
+
+    return {
+        "total_keys": total_keys,
+        "converged_keys": converged,
+        "conflicting_keys": conflicting,
+        "convergence_pct": pct,
+    }
+
+
+# --- Consultation quality helpers ---
+
+
+def insert_quality_rating(
+    consultation_id: str,
+    rating: int | None = None,
+    feedback: str | None = None,
+    concept_coverage: float | None = None,
+    pattern_count: int | None = None,
+    maturity_level: int | None = None,
+) -> int:
+    """Insert a quality rating for a consultation. Returns the record ID."""
+    conn = get_connection()
+    row = conn.execute(
+        """INSERT INTO consultation_quality
+           (consultation_id, rating, feedback, concept_coverage, pattern_count, maturity_level)
+           VALUES (?, ?, ?, ?, ?, ?)
+           RETURNING id""",
+        [consultation_id, rating, feedback, concept_coverage, pattern_count, maturity_level],
+    ).fetchone()
+    return row[0]
+
+
+def get_quality_ratings(limit: int = 20) -> list[dict]:
+    """Get recent quality ratings across consultations."""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT id, consultation_id, rating, feedback, concept_coverage,
+                  pattern_count, maturity_level, created_at
+           FROM consultation_quality
+           ORDER BY created_at DESC
+           LIMIT ?""",
+        [limit],
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "consultation_id": r[1],
+            "rating": r[2],
+            "feedback": r[3],
+            "concept_coverage": r[4],
+            "pattern_count": r[5],
+            "maturity_level": r[6],
+            "created_at": str(r[7]),
+        }
+        for r in rows
+    ]

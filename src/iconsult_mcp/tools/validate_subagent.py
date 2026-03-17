@@ -4,10 +4,15 @@ Validate subagent response tool for iconsult-mcp.
 Deterministic schema validation for subagent JSON responses returned
 during scatter-gather graph traversal (step 3 of the consulting workflow).
 No LLM calls — pure structural validation.
+
+Optional semantic validation checks discovered_ids and concept fields against
+the knowledge graph (requires DB access but still no LLM).
 """
 
 import logging
 from typing import Any
+
+from iconsult_mcp.db import get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +25,21 @@ _SCHEMA = {
 }
 
 
-async def validate_subagent(response: dict[str, Any]) -> dict:
+async def validate_subagent(
+    response: dict[str, Any],
+    validate_against_graph: bool = False,
+) -> dict:
     """Validate a subagent response against the expected schema.
 
     Args:
         response: The JSON object returned by a graph-analysis subagent.
+        validate_against_graph: If True, also verify discovered_ids and concept
+            field against the knowledge graph. Returns semantic_warnings separately
+            from structural errors.
 
     Returns:
-        Dict with valid (bool), errors (list[str]), and warnings (list[str]).
+        Dict with valid (bool), errors (list[str]), warnings (list[str]),
+        and optionally semantic_warnings (list[str]).
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -70,10 +82,67 @@ async def validate_subagent(response: dict[str, Any]) -> dict:
         errors.append("concept field is empty")
 
     valid = len(errors) == 0
-    return {
+    result = {
         "valid": valid,
         "errors": errors,
         "warnings": warnings,
         "field_count": len([k for k in _SCHEMA if k in response]),
         "expected_fields": list(_SCHEMA.keys()),
     }
+
+    # Semantic validation against the knowledge graph
+    if validate_against_graph:
+        semantic_warnings = _validate_semantics(response)
+        result["semantic_warnings"] = semantic_warnings
+        # Semantic issues don't affect structural validity
+
+    return result
+
+
+def _validate_semantics(response: dict[str, Any]) -> list[str]:
+    """Check discovered_ids and concept field against the concepts table."""
+    semantic_warnings: list[str] = []
+
+    try:
+        conn = get_connection()
+    except Exception:
+        semantic_warnings.append("Could not connect to DB for semantic validation")
+        return semantic_warnings
+
+    # Check discovered_ids exist in concepts table
+    discovered = response.get("discovered_ids", [])
+    if isinstance(discovered, list):
+        for did in discovered:
+            if not isinstance(did, str):
+                continue
+            row = conn.execute(
+                "SELECT id FROM concepts WHERE id = ?", [did]
+            ).fetchone()
+            if not row:
+                semantic_warnings.append(
+                    f"discovered_id '{did}' not found in concepts table"
+                )
+
+    # Check concept field matches a known concept name
+    concept = response.get("concept", "")
+    if isinstance(concept, str) and concept.strip():
+        row = conn.execute(
+            "SELECT id FROM concepts WHERE LOWER(name) = LOWER(?)",
+            [concept.strip()],
+        ).fetchone()
+        if not row:
+            # Try fuzzy match
+            row = conn.execute(
+                "SELECT name FROM concepts WHERE LOWER(name) LIKE LOWER(?)",
+                [f"%{concept.strip()}%"],
+            ).fetchone()
+            if row:
+                semantic_warnings.append(
+                    f"concept '{concept}' not an exact match — did you mean '{row[0]}'?"
+                )
+            else:
+                semantic_warnings.append(
+                    f"concept '{concept}' not found in knowledge graph"
+                )
+
+    return semantic_warnings

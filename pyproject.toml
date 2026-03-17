@@ -2,7 +2,7 @@
 name = "iconsult-mcp"
 version = "0.1.0"
 description = "MCP server for multi-agent architecture consultation, backed by a knowledge graph from 'Agentic Architectural Patterns for Building Multi-Agent Systems'"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0.0",
