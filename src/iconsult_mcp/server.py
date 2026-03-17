@@ -261,7 +261,12 @@ infinite recursion.
 
 6. **SYNTHESIZE** — Render the entire consultation as a single self-contained HTML page \
 using the `/generate-web-diagram` skill (writes HTML to `~/.agent/diagrams/`, opens in \
-browser). Only fall back to ASCII if the diagram has fewer than ~5 nodes and no edge labels. \
+browser). **Before generating**, read the reference template at \
+`templates/consultation-report.html` in the Iconsult MCP repo (search for it via \
+`glob **/Iconsult_mcp/templates/consultation-report.html`). Replicate its exact HTML \
+structure, CSS classes, and JavaScript patterns — especially the zoom controls, SVG \
+node tooltip system (JSON metadata + post-render JS), and stacked diagram layout. \
+Only fall back to ASCII if the diagram has fewer than ~5 nodes and no edge labels. \
 The HTML page MUST include these sections in order:
 
    **a. Executive Brief** — A prominent callout box (3-4 sentences) summarizing: what \
@@ -280,13 +285,18 @@ the pattern, (2) context-sensitive detail — if implemented: how it's done in t
 if partial: what's done + what's missing; if missing: why it matters for this specific \
 system, and (3) a book reference with chapter and page.
 
-   **e. Before/After architecture diagrams** — Side-by-side Mermaid flowcharts. Left: \
-current architecture. Right: target architecture. Color-code: blue for existing, red for \
-opportunities, green for new additions. **Every node must have a hover tooltip** (via \
-custom JS/CSS on the rendered SVG) containing: (1) the agent or component's role and \
-responsibilities, (2) why it matters in this architecture, and (3) for the current \
-diagram — what it does today; for the target diagram — what changes or gets added. \
-Use styled HTML tooltips, not browser-native title attributes.
+   **e. Before/After architecture diagrams** — Stacked Mermaid flowcharts (current on \
+top, target below — never side-by-side, as side-by-side renders too small to read). \
+Color-code: blue for existing, red for opportunities, green for new additions. **Every \
+node must have a hover tooltip** (via custom JS/CSS on the rendered SVG) containing: \
+(1) the agent or component's role and responsibilities, (2) why it matters in this \
+architecture, and (3) for the current diagram — what it does today; for the target \
+diagram — what changes or gets added. Use styled HTML tooltips, not browser-native \
+title attributes — use the "Mermaid SVG Node Tooltips" pattern from css-patterns.md \
+(JSON metadata block + post-render JS). Include zoom controls (+/−/reset buttons) and \
+Ctrl+scroll-to-zoom on each diagram container, plus drag-to-pan when zoomed. Use CSS \
+`transform: scale()` via a `--diagram-zoom` CSS custom property (not CSS `zoom`, \
+which doesn't work on SVG elements). See the reference template for the exact pattern.
 
    **f. Implementation Recommendations** — Recommendation cards grouped by phase. Each \
 card includes: priority badge, description grounded in the user's specific files, code \
@@ -1009,8 +1019,11 @@ references or book scenarios.
 
 6. **Synthesize recommendations** — Render the entire consultation as a **single \
 self-contained HTML page** using `/generate-web-diagram` (opens in browser). \
-Use ASCII only for trivial diagrams with fewer than ~5 nodes. The HTML page must include, \
-in order:
+**Before generating**, read the reference template at \
+`templates/consultation-report.html` in the Iconsult MCP repo (search for it via \
+`glob **/Iconsult_mcp/templates/consultation-report.html`). Replicate its exact HTML \
+structure, CSS, and JS patterns. Use ASCII only for trivial diagrams with fewer than \
+~5 nodes. The HTML page must include, in order:
    a. **Executive Brief** — 3-4 sentence callout box: what the system is, what it does well, \
 the single most impactful opportunity, the recommended path forward. For decision makers.
    b. **Maturity banner** — Current level and target level.
@@ -1020,11 +1033,16 @@ roster with roles and tool sets.
 pattern name must have a **hover tooltip** with: (1) pattern definition, (2) if implemented: \
 how it's done in this codebase; if partial: what's done + what's missing; if missing: why \
 it matters for this system, (3) book reference with chapter/page.
-   e. **Before/After architecture diagrams** — Side-by-side Mermaid flowcharts with \
+   e. **Before/After architecture diagrams** — Stacked Mermaid flowcharts (current on \
+top, target below — never side-by-side, as side-by-side renders too small to read) with \
 interactive hover tooltips on every node. Each tooltip shows the agent/component's role, \
 responsibilities, and why it matters. Current diagram: what it does today. Target diagram: \
 what changes or gets added. Use styled HTML tooltips on the rendered SVG, not browser-native \
-title attributes.
+title attributes — use the "Mermaid SVG Node Tooltips" pattern from css-patterns.md \
+(JSON metadata block + post-render JS). Include zoom controls (+/−/reset buttons) and \
+Ctrl+scroll-to-zoom on each diagram container, plus drag-to-pan when zoomed. Use CSS \
+`transform: scale()` via a `--diagram-zoom` CSS custom property (not CSS `zoom`, \
+which doesn't work on SVG elements). See the reference template for the exact pattern.
    f. **Implementation Recommendations** — Cards grouped by phase with priority badges, \
 code snippets, file refs, book citations.
    g. **Failure Recovery Chain** from Ch. 7.
