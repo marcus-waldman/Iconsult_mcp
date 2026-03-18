@@ -39,8 +39,11 @@ def consultation_cleanup():
 
     yield register
 
-    # Cleanup: remove test consultations and related data
-    from iconsult_mcp.db import get_connection
+    # Cleanup: discard any buffered steps, then remove test data from DB
+    from iconsult_mcp.db import get_connection, discard_pending_steps
+
+    for cid in created_ids:
+        discard_pending_steps(cid)
 
     conn = get_connection()
     for cid in created_ids:

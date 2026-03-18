@@ -51,6 +51,7 @@ tests/
   test_pattern_id_aliases.py      Pattern ID alias resolution (KG ↔ maturity model)
   test_blackboard.py              Blackboard facts, conflicts, TTL, convergence
   test_render_report.py           Server-side HTML report rendering
+  test_step_buffer.py             Write-behind buffer for step logging
 
 scripts/
   run_pipeline.py    Pipeline orchestrator
@@ -258,6 +259,7 @@ All parameterized tests automatically pick up new cases. To find valid concept I
 | `test_pattern_id_aliases.py` | KG↔maturity model ID resolution, bidirectional aliases, normalize_pattern_id, maturity computation with KG IDs, failure chain/template coverage |
 | `test_blackboard.py` | Assert/query facts, append-only versioning, conflict detection, convergence status, TTL expiry, confidence filtering, shared_state bridge |
 | `test_render_report.py` | HTML generation structure, XSS escaping, missing consultation/assessments errors, tooltip JSON validity, maturity data |
+| `test_step_buffer.py` | Write-behind buffer: buffering, auto-flush on read, flush_all, empty/nonexistent flush, end-to-end with scoring, blackboard versioning |
 
 ## Resilience
 

@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _connection: Optional[duckdb.DuckDBPyConnection] = None
 _vss_available: bool = False
 _is_share: bool = False
+_step_buffer: dict[str, list[dict]] = {}
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
@@ -56,6 +57,7 @@ def close_connection():
     """Close the database connection."""
     global _connection
     if _connection is not None:
+        flush_all_steps()
         _connection.close()
         _connection = None
 
@@ -634,30 +636,62 @@ def log_consultation_step(
     step_type: str,
     data: dict,
 ) -> None:
-    """Append a step to a consultation's steps JSON array."""
+    """Buffer a step for later batch flush (no DB write)."""
+    step = {"type": step_type, **data}
+    if consultation_id not in _step_buffer:
+        _step_buffer[consultation_id] = []
+    _step_buffer[consultation_id].append(step)
+
+
+def flush_consultation_steps(consultation_id: str) -> int:
+    """Batch-flush buffered steps for a consultation. Returns count flushed."""
     import json as _json
 
+    pending = _step_buffer.pop(consultation_id, None)
+    if not pending:
+        return 0
+
     conn = get_connection()
-    # Read current steps
     row = conn.execute(
         "SELECT steps FROM consultations WHERE id = ?",
         [consultation_id],
     ).fetchone()
     if not row:
-        return
+        # Consultation was deleted; discard buffer
+        return 0
 
     current_steps = _json.loads(row[0]) if row[0] else []
-    current_steps.append({"type": step_type, **data})
+    current_steps.extend(pending)
     conn.execute(
         "UPDATE consultations SET steps = ? WHERE id = ?",
         [_json.dumps(current_steps), consultation_id],
     )
+    return len(pending)
+
+
+def flush_all_steps() -> int:
+    """Flush buffered steps for all consultations. Returns total count flushed."""
+    total = 0
+    for cid in list(_step_buffer.keys()):
+        total += flush_consultation_steps(cid)
+    return total
+
+
+def get_pending_steps(consultation_id: str) -> list[dict]:
+    """Read-only view of buffered steps (for testing)."""
+    return list(_step_buffer.get(consultation_id, []))
+
+
+def discard_pending_steps(consultation_id: str) -> int:
+    """Clear buffer without flushing (for test cleanup). Returns count discarded."""
+    return len(_step_buffer.pop(consultation_id, []))
 
 
 def get_consultation(consultation_id: str) -> dict | None:
-    """Return a full consultation record."""
+    """Return a full consultation record. Auto-flushes buffered steps first."""
     import json as _json
 
+    flush_consultation_steps(consultation_id)
     conn = get_connection()
     row = conn.execute(
         "SELECT id, project_fingerprint, project_description, matched_concept_ids, matched_scores, steps, created_at FROM consultations WHERE id = ?",
@@ -680,6 +714,7 @@ def get_consultations_by_fingerprint(fingerprint: str) -> list[dict]:
     """Find all consultation sessions for the same project fingerprint."""
     import json as _json
 
+    flush_all_steps()
     conn = get_connection()
     rows = conn.execute(
         "SELECT id, project_fingerprint, matched_concept_ids, matched_scores, steps, created_at FROM consultations WHERE project_fingerprint = ? ORDER BY created_at DESC",
@@ -702,6 +737,7 @@ def get_pattern_assessments(consultation_id: str) -> list[dict]:
     """Extract pattern_assessment steps from a consultation's step log."""
     import json as _json
 
+    flush_consultation_steps(consultation_id)
     conn = get_connection()
     row = conn.execute(
         "SELECT steps FROM consultations WHERE id = ?",
@@ -974,14 +1010,6 @@ def assert_blackboard_fact(
 
     conn = get_connection()
 
-    # Compute next version for this (consultation_id, key, agent_id)
-    existing = conn.execute(
-        """SELECT COALESCE(MAX(version), 0) FROM blackboard_facts
-           WHERE consultation_id = ? AND key = ? AND agent_id IS NOT DISTINCT FROM ?""",
-        [consultation_id, key, agent_id],
-    ).fetchone()
-    next_version = (existing[0] if existing else 0) + 1
-
     expires_at = None
     if ttl_seconds is not None:
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
@@ -989,10 +1017,15 @@ def assert_blackboard_fact(
     row = conn.execute(
         """INSERT INTO blackboard_facts
            (consultation_id, fact_type, key, value_json, confidence, agent_id, version, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?,
+                   (SELECT COALESCE(MAX(version), 0) + 1
+                    FROM blackboard_facts
+                    WHERE consultation_id = ? AND key = ?
+                      AND agent_id IS NOT DISTINCT FROM ?),
+                   ?)
            RETURNING id""",
         [consultation_id, fact_type, key, _json.dumps(value), confidence,
-         agent_id, next_version, expires_at],
+         agent_id, consultation_id, key, agent_id, expires_at],
     ).fetchone()
     return row[0]
 

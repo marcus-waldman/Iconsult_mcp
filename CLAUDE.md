@@ -11,6 +11,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`, `tools/implementation_plan.py`, `tools/blackboard.py`, `tools/quality.py`, `tools/render_report.py`
 - L4 modules: `access_policy.py` (tool access levels + consultation ownership validation)
 - Pattern ID aliasing: `_PATTERN_ID_ALIASES` in `score_architecture.py` bridges MATURITY_MODEL IDs ↔ KG concept IDs; `normalize_pattern_id()` resolves either to canonical form
+- Write-behind buffer: `_step_buffer` in `db.py` buffers `log_consultation_step` calls in memory; auto-flushed by `get_consultation()` / `get_pattern_assessments()` before reads
 - Resilience: `escalation.py` (structured error responses), dispatch dict + timeout/retry in `server.py`
 - Developer docs: `docs/development.md`
 
@@ -26,7 +27,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - Integration tests in `tests/` — require MOTHERDUCK_TOKEN and OPENAI_API_KEY env vars
 - Test cases in `tests/cases.py` — 12 architectures derived from openai/openai-agents-python examples
 - Adding a test case = adding a dict to `CASES` in `tests/cases.py` (id, description, expected_concepts, pattern_assessments)
-- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_implementation_plan.py` (plan generation/tracking), `test_consultation_flow.py` (end-to-end), `test_pattern_id_aliases.py` (pattern ID alias resolution), `test_blackboard.py` (blackboard knowledge hub)
+- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_implementation_plan.py` (plan generation/tracking), `test_consultation_flow.py` (end-to-end), `test_pattern_id_aliases.py` (pattern ID alias resolution), `test_blackboard.py` (blackboard knowledge hub), `test_step_buffer.py` (write-behind buffer)
 
 ## Environment Variables
 - `MOTHERDUCK_TOKEN` — required for database
