@@ -29,6 +29,11 @@ src/iconsult_mcp/
     implementation_plan.py     Phased implementation plan generation + tracking
     blackboard.py              Typed, versioned fact store for scatter-gather coordination
     quality.py                 Consultation quality ratings + analytics
+    render_report.py           Server-side HTML report rendering (slot-based template)
+
+templates/
+  consultation-report.html          Reference template (real consultation example)
+  consultation-report-template.html Slot-based template used by render_report tool
 
 tests/
   cases.py           Test case definitions (12 OpenAI agent examples)
@@ -45,6 +50,7 @@ tests/
   test_implementation_plan.py     Plan generation + step tracking
   test_pattern_id_aliases.py      Pattern ID alias resolution (KG ↔ maturity model)
   test_blackboard.py              Blackboard facts, conflicts, TTL, convergence
+  test_render_report.py           Server-side HTML report rendering
 
 scripts/
   run_pipeline.py    Pipeline orchestrator
@@ -150,6 +156,7 @@ py scripts/run_pipeline.py --reset      # Clear everything and start over
 | `query_facts` | **Blackboard (query)** | Query facts with optional filters; `detect_conflicts` finds disagreements between agents; convergence summary |
 | `rate_consultation` | **Quality (rate)** | Record user quality score (1-5) and/or feedback; snapshots consultation metadata |
 | `consultation_analytics` | **Quality (analytics)** | Surface quality trends across consultations (avg rating, coverage, pattern counts, distribution) |
+| `render_report` | **Render report** | Server-side HTML rendering; pulls scores/scenarios/coverage from DB, merges with Claude-provided narrative (~1700 tokens), writes complete HTML with CSS/JS/zoom/tooltips to disk |
 
 ### Reproducible Consultations
 
@@ -174,7 +181,7 @@ The `match_concepts` → `get_subgraph` → `ask_book` → `consultation_report`
 4. **RETRIEVE PASSAGES** — `ask_book` scoped to discovered concepts with `consultation_id`; follow `suggested_questions`
 5. **CHECK COVERAGE + SCORE + STRESS TEST** — `consultation_report` to verify gaps; `score_architecture` for maturity scorecard with current status and goals; `generate_failure_scenarios` for concrete failure walkthroughs
 5b. **CRITIQUE (optional)** — `critique_consultation` for deterministic quality critique; use `prompt_mutations` to address gaps; `max_iterations` (1-3) for multi-pass with convergence detection
-6. **SYNTHESIZE** — Render entire consultation as a single HTML page via `/generate-web-diagram`. HTML sections in order: (a) Executive Brief callout for decision makers, (b) Maturity banner (current → target), (c) System Under Review with agent roster, (d) Maturity Scorecard table with hover tooltips on every pattern (definition + context-sensitive detail + book ref), (e) Before/After Mermaid diagrams (red gaps / green additions), (f) Implementation Recommendation cards by phase with code snippets + citations, (g) Failure Recovery Chain, (h) Stress Test: Failure Scenarios (collapsible cascading failure traces, Ch. 7 chain coverage, inverted pyramid warnings). Also check prerequisite/conflict edges; comparison tables as HTML when 4+ rows
+6. **SYNTHESIZE** — Call `render_report` with consultation_id and narrative content (title, executive_brief, system_description, agents, diagram_current/target, tooltips_current/target, recommendation_narratives). The tool renders the full HTML report server-side using the slot-based template and pulls structured data (scores, scenarios, coverage) from the database automatically. Returns the file path.
 7. **OFFER IMPLEMENTATION PLAN** — ask user if they want a step-by-step plan; if yes, `generate_implementation_plan`; recommend fresh conversation for implementation using `get_implementation_plan` + `update_plan_step`
 
 ## Testing
@@ -250,6 +257,7 @@ All parameterized tests automatically pick up new cases. To find valid concept I
 | `test_implementation_plan.py` | Plan structure, phase matching, step classification (mechanical/design_decision), ordering, markdown output, step updates, determinism |
 | `test_pattern_id_aliases.py` | KG↔maturity model ID resolution, bidirectional aliases, normalize_pattern_id, maturity computation with KG IDs, failure chain/template coverage |
 | `test_blackboard.py` | Assert/query facts, append-only versioning, conflict detection, convergence status, TTL expiry, confidence filtering, shared_state bridge |
+| `test_render_report.py` | HTML generation structure, XSS escaping, missing consultation/assessments errors, tooltip JSON validity, maturity data |
 
 ## Resilience
 

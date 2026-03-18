@@ -81,13 +81,13 @@ The consultation followed Iconsult's guided workflow:
 
 4. **Retrieve book passages** — `ask_book` scoped to the discovered concepts returned exact citations: chapter numbers, page ranges, and quotes grounding each recommendation.
 
-5. **Score + stress test + synthesize** — `score_architecture` computed the maturity scorecard from logged assessments. `generate_failure_scenarios` produced concrete resilience scenarios for each opportunity — illustrating how the architecture responds under stress and where it would benefit from additional patterns. Then generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) with specific file-level changes, prerequisite checks, and conflict analysis. All recommended patterns are complementary — no conflicts detected.
+5. **Score + stress test + synthesize** — `score_architecture` computed the maturity scorecard from logged assessments. `generate_failure_scenarios` produced concrete resilience scenarios for each opportunity — illustrating how the architecture responds under stress and where it would benefit from additional patterns. Then `render_report` generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) server-side — pulling scores, scenarios, and coverage from the database and merging with narrative content to produce the complete HTML report with zoom controls, SVG tooltips, and animations. All recommended patterns are complementary — no conflicts detected.
 
 ## What It Does
 
 Point it at a codebase (or describe your architecture), and it runs a structured consultation: matching concepts, traversing the knowledge graph for prerequisites and conflicts, scoring maturity against a 6-level model, and generating an interactive HTML review with before/after architecture diagrams.
 
-### Tools (24)
+### Tools (25)
 
 **Consultation workflow:**
 
@@ -102,6 +102,7 @@ Point it at a codebase (or describe your architecture), and it runs a structured
 | `score_architecture` | Scoring | Deterministic maturity scorecard (L1–L6) from logged pattern assessments; pattern ID aliases bridge KG ↔ maturity model IDs |
 | `generate_failure_scenarios` | Resilience analysis | Resilience scenarios for each opportunity — code-grounded or book-grounded, with Ch. 7 recovery chain mapping |
 | `critique_consultation` | Quality | Structural critique with actionable fix suggestions; multi-iteration mode (1-3 passes) with convergence detection |
+| `render_report` | Report rendering | Server-side HTML rendering — pulls scores/scenarios/coverage from DB, merges with narrative content, writes complete HTML with CSS/JS/zoom/tooltips |
 | `supervise_consultation` | Supervision | Tracks workflow progress across 9 phases, suggests next action with tool + params |
 | `generate_implementation_plan` | Implementation | Phased markdown checklist from consultation results; classifies steps as mechanical or design decision |
 | `get_implementation_plan` | Implementation | Retrieve a previously generated plan with progress summary |
@@ -148,23 +149,21 @@ Relationship types span `uses`, `extends`, `alternative_to`, `component_of`, `re
 - Python 3.10+
 - A [MotherDuck](https://motherduck.com) account (free tier works)
 - OpenAI API key (for embeddings used by `ask_book`)
-- **Claude Code** with the [visual-explainer](https://github.com/nicobailon/visual-explainer) skill installed (required for architecture diagram rendering — see below)
+- **Claude Code** (optionally with the [visual-explainer](https://github.com/nicobailon/visual-explainer) skill for ad-hoc diagrams outside consultations)
 
 ### Database Access
 
 The knowledge graph is hosted on MotherDuck and shared publicly. The server automatically detects whether you own the database or need to attach the public share — no extra configuration needed. Just provide your MotherDuck token and it works.
 
-### Install visual-explainer (Claude Code skill)
+### Install visual-explainer (optional)
 
-Iconsult renders architecture diagrams as interactive HTML pages using the [visual-explainer](https://github.com/nicobailon/visual-explainer) skill. Install it once:
+The [visual-explainer](https://github.com/nicobailon/visual-explainer) skill is no longer required for consultations — `render_report` now handles HTML rendering server-side. However, it remains useful for ad-hoc diagrams outside consultations:
 
 ```bash
 git clone https://github.com/nicobailon/visual-explainer.git ~/.claude/skills/visual-explainer
 mkdir -p ~/.claude/commands
 cp ~/.claude/skills/visual-explainer/prompts/*.md ~/.claude/commands/
 ```
-
-This gives Claude Code the `/generate-web-diagram` command used during consultations. Diagrams are written to `~/.agent/diagrams/` and opened in your browser automatically.
 
 ### Install
 

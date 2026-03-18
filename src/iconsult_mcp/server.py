@@ -42,6 +42,7 @@ from iconsult_mcp.tools.implementation_plan import (
 )
 from iconsult_mcp.tools.blackboard import assert_fact, query_facts
 from iconsult_mcp.tools.quality import rate_consultation, consultation_analytics
+from iconsult_mcp.tools.render_report import render_report
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ TOOL_METADATA = {
     "query_facts": {"timeout": 10, "retryable": False, "category": "coordination", "access_level": "read"},
     "rate_consultation": {"timeout": 10, "retryable": False, "category": "quality", "access_level": "write"},
     "consultation_analytics": {"timeout": 10, "retryable": False, "category": "quality", "access_level": "read"},
+    "render_report": {"timeout": 30, "retryable": False, "category": "consultation", "access_level": "write"},
 }
 
 # Dispatch table: tool name → handler(arguments) → coroutine
@@ -193,6 +195,19 @@ TOOL_DISPATCH = {
     "consultation_analytics": lambda args: consultation_analytics(
         limit=args.get("limit", 20),
     ),
+    "render_report": lambda args: render_report(
+        consultation_id=args.get("consultation_id", ""),
+        title=args.get("title", ""),
+        executive_brief=args.get("executive_brief", ""),
+        system_description=args.get("system_description", {}),
+        agents=args.get("agents", []),
+        diagram_current=args.get("diagram_current", ""),
+        diagram_target=args.get("diagram_target", ""),
+        tooltips_current=args.get("tooltips_current", {}),
+        tooltips_target=args.get("tooltips_target", {}),
+        recommendation_narratives=args.get("recommendation_narratives"),
+        output_dir=args.get("output_dir"),
+    ),
 }
 
 INSTRUCTIONS = """\
@@ -295,64 +310,22 @@ execute the suggested tool calls and address the gaps. Each mutation specifies a
 (tool name), params, and reason. Cap this reflection loop at 1 iteration to prevent \
 infinite recursion.
 
-6. **SYNTHESIZE** — Render the entire consultation as a single self-contained HTML page \
-using the `/generate-web-diagram` skill (writes HTML to `~/.agent/diagrams/`, opens in \
-browser). **Before generating**, read the reference template at \
-`templates/consultation-report.html` in the Iconsult MCP repo (search for it via \
-`glob **/Iconsult_mcp/templates/consultation-report.html`). Replicate its exact HTML \
-structure, CSS classes, and JavaScript patterns — especially the zoom controls, SVG \
-node tooltip system (JSON metadata + post-render JS), and stacked diagram layout. \
-Only fall back to ASCII if the diagram has fewer than ~5 nodes and no edge labels. \
-The HTML page MUST include these sections in order:
-
-   **a. Executive Brief** — A prominent callout box (3-4 sentences) summarizing: what \
-the system is, what it does well, the single most impactful opportunity for growth, and \
-the recommended path forward. Written for a decision maker who won't read the rest.
-
-   **b. Maturity banner** — Current level and target level, prominently displayed.
-
-   **c. System Under Review** — A section describing what the system does, its \
-architecture, tech stack, coordination mechanism, and an agent roster showing each \
-agent's role and tool set. Provides context for why specific patterns matter.
-
-   **d. Maturity Scorecard table** — Pattern name, Level, Status, Goal, Phase, Evidence. \
-Every pattern name MUST have a **hover tooltip** containing: (1) a concise definition of \
-the pattern, (2) context-sensitive detail — if implemented: how it's done in this codebase; \
-if partial: what's done + what's missing; if missing: why it matters for this specific \
-system, and (3) a book reference with chapter and page.
-
-   **e. Before/After architecture diagrams** — Stacked Mermaid flowcharts (current on \
-top, target below — never side-by-side, as side-by-side renders too small to read). \
-Color-code: blue for existing, red for opportunities, green for new additions. **Every \
-node must have a hover tooltip** (via custom JS/CSS on the rendered SVG) containing: \
-(1) the agent or component's role and responsibilities, (2) why it matters in this \
-architecture, and (3) for the current diagram — what it does today; for the target \
-diagram — what changes or gets added. Use styled HTML tooltips, not browser-native \
-title attributes — use the "Mermaid SVG Node Tooltips" pattern from css-patterns.md \
-(JSON metadata block + post-render JS). Include zoom controls (+/−/reset buttons) and \
-Ctrl+scroll-to-zoom on each diagram container, plus drag-to-pan when zoomed. Use CSS \
-`transform: scale()` via a `--diagram-zoom` CSS custom property (not CSS `zoom`, \
-which doesn't work on SVG elements). See the reference template for the exact pattern.
-
-   **f. Implementation Recommendations** — Recommendation cards grouped by phase. Each \
-card includes: priority badge, description grounded in the user's specific files, code \
-snippets where applicable, file references, and book citations with chapter and page.
-
-   **g. Failure Recovery Chain** — The recommended failure chain from Ch. 7.
-
-   **h. Stress Test: Failure Scenarios** — For each CRITICAL/WARNING gap from \
-`generate_failure_scenarios`, show a step-by-step failure cascade trace. Each trace \
-has: trigger event, propagation steps (with file:line references when available), \
-downstream impact, book reference, and the recovery pattern recommendation. Include \
-the failure chain coverage diagram showing which of the 5 Ch. 7 recovery steps are \
-implemented vs. missing. Flag inverted pyramid warnings where advanced patterns depend \
-on missing foundations. Use collapsible `<details>/<summary>` elements for each scenario.
-
-   Additional requirements:
-   - Check `requires` edges — note prerequisites that would strengthen the foundation
-   - Check `conflicts_with` edges — highlight potential incompatibilities to consider
-   - Compare alternatives using `alternative_to` edges with pros/cons. For comparisons \
-with 4+ rows or 3+ columns, render as a styled HTML table within the same page.
+6. **SYNTHESIZE** — Call `render_report` with the `consultation_id` and narrative content. \
+The tool renders the full HTML report server-side using the reference template and pulls \
+structured data (scores, scenarios, coverage) from the database automatically. Provide:
+   - **title**: report title (e.g. "MyProject Architecture Consultation")
+   - **executive_brief**: 3-4 sentences for a decision maker (what it does well + \
+most impactful opportunity + recommended path forward)
+   - **system_description**: `{subtitle, architecture, tech_stack, coordination, security}`
+   - **agents**: `[{name, icon, color, description, tools}]`
+   - **diagram_current** / **diagram_target**: raw Mermaid flowchart definitions \
+(blue=existing, red dashed=opportunities, green=new). Color-code with classDef.
+   - **tooltips_current** / **tooltips_target**: `{node_id: {title, desc, ref}}` for \
+SVG hover tooltips on each node (role, responsibilities, what it does/changes)
+   - **recommendation_narratives** (optional): `{pattern_id: description}` for richer \
+recommendation cards grounded in the user's specific files
+   Do NOT generate raw HTML — the tool handles all CSS, JS, zoom controls, animations, \
+and tooltip systems. It returns the file path to the written HTML report.
 
 7. **OFFER IMPLEMENTATION PLAN** — After rendering the HTML report, ask the user \
 whether they would like a step-by-step implementation plan. If yes, call \
@@ -1057,6 +1030,69 @@ async def list_tools() -> list[Tool]:
                         "description": "Maximum number of recent ratings to return (default 20)",
                     },
                 },
+            },
+        ),
+        Tool(
+            name="render_report",
+            description=(
+                "RENDER REPORT — Server-side HTML report rendering. Pulls structured data "
+                "(scores, scenarios, coverage) from the database and merges with Claude-provided "
+                "narrative content to produce a complete HTML report with all CSS, JS, zoom "
+                "controls, SVG tooltips, and animations. Claude provides only ~1700 tokens of "
+                "narrative; the tool handles the rest. Returns the file path."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "consultation_id": {
+                        "type": "string",
+                        "description": "The consultation session to render",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Report title (e.g. 'MyProject Architecture Consultation')",
+                    },
+                    "executive_brief": {
+                        "type": "string",
+                        "description": "3-4 sentence executive summary for decision makers",
+                    },
+                    "system_description": {
+                        "type": "object",
+                        "description": "System details: {subtitle, architecture, tech_stack, coordination, security}",
+                    },
+                    "agents": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Agent roster: [{name, icon, color, description, tools}]",
+                    },
+                    "diagram_current": {
+                        "type": "string",
+                        "description": "Raw Mermaid flowchart definition for current architecture",
+                    },
+                    "diagram_target": {
+                        "type": "string",
+                        "description": "Raw Mermaid flowchart definition for target architecture",
+                    },
+                    "tooltips_current": {
+                        "type": "object",
+                        "description": "SVG tooltip metadata for current diagram: {node_id: {title, desc, ref}}",
+                    },
+                    "tooltips_target": {
+                        "type": "object",
+                        "description": "SVG tooltip metadata for target diagram: {node_id: {title, desc, ref}}",
+                    },
+                    "recommendation_narratives": {
+                        "type": "object",
+                        "description": "Optional {pattern_id: description} for richer recommendation cards",
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        "description": "Output directory (default: ~/.agent/diagrams/)",
+                    },
+                },
+                "required": ["consultation_id", "title", "executive_brief", "system_description",
+                             "agents", "diagram_current", "diagram_target",
+                             "tooltips_current", "tooltips_target"],
             },
         ),
     ]
