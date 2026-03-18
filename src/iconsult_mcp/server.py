@@ -220,12 +220,14 @@ concepts, their relationships, and full book text.
 
 1. **READ PROJECT** — Always read the user's codebase first. Understand their \
 current architecture, tech stack, and goals before consulting the graph. \
-Then narrate in 1-2 sentences: what you found and what the key architectural themes are.
+Then narrate: what you found, what stands out (✅ celebrate strengths, 💡 flag \
+anything that already hints at opportunities).
 
 2. **MATCH CONCEPTS** — Call `match_concepts` with a concise project description. \
 This deterministically embeds the description and returns ranked concept matches with \
 a `consultation_id` that tracks the session. The same description always produces the \
-same concept ranking. Use `list_concepts` only for browsing/filtering the full catalogue.
+same concept ranking. Use `list_concepts` only for browsing/filtering the full catalogue. \
+Then narrate: what you're searching for and which top concepts came back — any surprises?
 
 2b. **PLAN** — Call `plan_consultation` with the `consultation_id` from step 2. \
 This assesses project complexity (simple/moderate/complex) based on matched concept \
@@ -233,7 +235,8 @@ count, description keywords, and relationship density, then generates an adaptiv
 step-by-step plan. Follow the generated plan for the remaining steps. The plan \
 adjusts traversal depth, subagent usage, and critique requirements based on complexity. \
 Optionally call `supervise_consultation` after each major step to track progress and \
-get the suggested next action.
+get the suggested next action. \
+Then narrate: the complexity verdict and what the plan focuses on.
 
 3. **TRAVERSE GRAPH (scatter-gather)** — For each matched seed concept, spawn a \
 parallel subagent (via the Agent tool) to explore its neighbourhood independently. \
@@ -274,8 +277,9 @@ and dependency information from `requires` edges. For missing patterns, note wha
 fail — e.g., `{"code_refs": [{"file": "payment.py", "line": 45, "snippet": "resp = \
 api.call()"}], "failure_mode": "No retry logic, API failures propagate to orchestrator"}`.
 
-   Then narrate in 1-2 sentences: the single most significant finding — a \
-prerequisite to strengthen, a conflict to address, or an alternative worth exploring.
+   Then narrate your single biggest 💡 — a prerequisite to strengthen, a \
+conflict to address, or an alternative worth exploring. Connect it back to \
+something concrete in the codebase (🔗).
 
    **Shared state:** Use `assert_fact` and `query_facts` (Blackboard Knowledge Hub) for \
 typed, versioned subagent coordination — e.g., assert discovered concept IDs, pattern \
@@ -291,7 +295,8 @@ compact defaults (omit optional parameters for the smallest useful response).
 4. **RETRIEVE PASSAGES** — Call `ask_book` scoped to concept IDs discovered in \
 step 3, passing `consultation_id` for logging. Use `suggested_questions` from the \
 response to ask deterministic follow-up questions derived from graph edges. \
-Then narrate in 1-2 sentences: the key insight the book provides.
+Then narrate: what the book confirms or adds — especially any 💡 that connects \
+a finding from step 3 to a concrete recommendation.
 
 5. **CHECK COVERAGE + SCORE** — Call `consultation_report` with the `consultation_id` to \
 check coverage gaps before synthesizing. Concept coverage counts matched concepts that \
@@ -301,14 +306,17 @@ or log more pattern assessments. \
 Call `score_architecture` to get the maturity scorecard with current status and goals. \
 Call `generate_failure_scenarios` to produce concrete failure walkthroughs for each gap. \
 These illustrate how the architecture would benefit from each pattern, using actual \
-code paths (code-grounded mode) or book scenarios (book-grounded mode).
+code paths (code-grounded mode) or book scenarios (book-grounded mode). \
+Then narrate: the maturity level, the biggest ✅ strength, and the single most impactful \
+💡 opportunity. If coverage was low and you backfilled, note what you went back for.
 
 5b. **CRITIQUE (optional)** — Call `critique_consultation` to get a deterministic quality \
 critique of the consultation so far. If errors are found (missing workflow steps, no \
 pattern assessments, critical edges unchecked), use the `prompt_mutations` field to \
 execute the suggested tool calls and address the gaps. Each mutation specifies an action \
 (tool name), params, and reason. Cap this reflection loop at 1 iteration to prevent \
-infinite recursion.
+infinite recursion. \
+Then narrate briefly: whether the critique passed clean or what you fixed.
 
 6. **SYNTHESIZE** — Call `render_report` with the `consultation_id` and narrative content. \
 The tool renders the full HTML report server-side using the reference template and pulls \
@@ -334,6 +342,28 @@ classified as "mechanical" (concrete code changes) or "design_decision" (archite
 choices needed). After generating, recommend the user start a fresh conversation for \
 implementation to keep context clean. In the fresh conversation, use \
 `get_implementation_plan` to load the plan and `update_plan_step` to track progress.
+
+## Narration Style — Think Out Loud
+Narrate your progress throughout the consultation so the user follows your reasoning in \
+real time. Be concise — 1-2 sentences per moment. Use this visual language:
+
+- **Stage transitions**: bold header with icon — `### 🔍 Step 1 — Reading the Codebase`
+- **What & why**: "Matching against 138 patterns to find what's relevant to your fan-out \
+architecture..."
+- **💡 Aha moments**: When you discover something significant — a prerequisite gap, an \
+elegant implementation, an unexpected connection — call it out: \
+`**💡** The retry logic in handler.py:23 covers HTTP but not the message queue — that's \
+a resilience blind spot the Retry pattern would close.`
+- **✅ Celebrations**: For implemented patterns: `**✅** Solid retry-with-backoff already \
+in place — that's L3 resilience.`
+- **🔗 Connections**: When findings link together: `**🔗** This ties back to the supervisor \
+gap — both need an explicit escalation path.`
+- **⚠️ Tensions**: For conflicts or trade-offs: `**⚠️** Adding consensus here would \
+conflict with the latency budget — worth discussing.`
+
+The pattern is: *"This is what I'm doing → this is why → oh! this is what I found."* \
+These discovery moments are the value of the consultation — surface them, don't suppress them. \
+Narrate at every step transition and whenever something non-obvious emerges.
 
 ## Tone and Framing
 - Frame the consultation as a **growth roadmap**, not a deficiency report. Lead with \
@@ -1185,16 +1215,19 @@ I need architecture consulting for my project. Here is my context:
 Please follow this workflow:
 
 1. **Read my codebase** — Examine my project files to understand the current \
-architecture, tech stack, and patterns in use. Then tell me in 1-2 sentences \
-what you found and what you see as the key architectural themes and opportunities.
+architecture, tech stack, and patterns in use. Then think out loud: what you found, \
+what stands out — celebrate (✅) what's strong and flag (💡) anything that hints at \
+opportunities.
 
 2. **Match concepts** — Call `match_concepts` with a concise project description \
 summarizing the architecture and goals you identified. This returns deterministic \
-concept rankings and a `consultation_id` for tracking the session.
+concept rankings and a `consultation_id` for tracking the session. Then think out loud: \
+what you searched for and which top concepts came back — any surprises?
 
 2b. **Plan** — Call `plan_consultation` with the `consultation_id`. This assesses \
 complexity and generates an adaptive plan. Follow the plan for remaining steps. \
-Optionally call `supervise_consultation` after each major step for progress tracking.
+Optionally call `supervise_consultation` after each major step for progress tracking. \
+Then tell me: the complexity verdict and what the plan focuses on.
 
 3. **Traverse the graph (scatter-gather)** — For each matched seed concept, spawn a \
 parallel subagent (via the Agent tool) to explore its neighbourhood. Each subagent calls \
@@ -1206,19 +1239,22 @@ If subagents are not available, call `get_subgraph` directly with compact defaul
 identify in my codebase (or confirm is not yet present). This enables deterministic \
 scoring. Use `write_state`/`read_state` for subagent coordination and `emit_event` to \
 signal discoveries (e.g., `gap_found` when an opportunity for a key pattern is identified). \
-Then tell me in 1-2 sentences the single most significant finding from the graph.
+Then tell me your single biggest 💡 from the graph — what surprised you or \
+what connects back (🔗) to something concrete in my codebase.
 
 4. **Retrieve book passages** — Call `ask_book` scoped to the discovered concept \
 IDs, passing the `consultation_id`. Use `suggested_questions` from the response \
 to ask deterministic follow-up questions. Cite chapter and page numbers. Then tell \
-me in 1-2 sentences the key insight the book provides.
+me: what the book confirms or adds — especially any 💡 that connects a graph finding \
+to a concrete recommendation.
 
 5. **Check coverage and score** — Call `consultation_report` with the `consultation_id` \
 to check coverage. Then call `score_architecture` to get the maturity scorecard \
 with current status and goals. If coverage is low, go back and explore further. \
 Then call `generate_failure_scenarios` to produce concrete resilience scenarios — \
 these illustrate how the architecture would benefit from each pattern, using code \
-references or book scenarios.
+references or book scenarios. Then tell me: the maturity level, the biggest ✅ strength, \
+and the single most impactful 💡 opportunity.
 
 6. **Synthesize recommendations** — Render the entire consultation as a **single \
 self-contained HTML page** using `/generate-web-diagram` (opens in browser). \

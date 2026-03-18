@@ -74,8 +74,10 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `consult(context)` — guided architecture consultation; interpolates user's project context into the full 7-step workflow
 
 ### Consulting workflow (server instructions)
-1. READ PROJECT — read user's codebase first
-2. MATCH CONCEPTS — `match_concepts` with project description → deterministic concept ranking + `consultation_id`
+- Each step narrates progress with visual markers: 💡 aha moments, ✅ celebrations, 🔗 connections, ⚠️ tensions
+- Pattern: "This is what I'm doing → this is why → oh! this is what I found."
+1. READ PROJECT — read user's codebase first; narrate strengths + early observations
+2. MATCH CONCEPTS — `match_concepts` with project description → deterministic concept ranking + `consultation_id`; narrate top matches
 2b. PLAN — `plan_consultation` to assess complexity and generate adaptive plan; optionally `supervise_consultation` after each step
 3. TRAVERSE GRAPH (scatter-gather) — spawn parallel subagents per seed concept, each calling `get_subgraph` with `consultation_id`; call `log_pattern_assessment` for each pattern found/not yet present/not_applicable; use `write_state`/`read_state` for subagent coordination; use `emit_event` for opportunity discovery
 4. RETRIEVE PASSAGES — `ask_book` scoped to discovered concept IDs with `consultation_id`; use `suggested_questions` for follow-ups
