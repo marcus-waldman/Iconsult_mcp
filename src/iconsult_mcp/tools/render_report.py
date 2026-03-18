@@ -225,7 +225,8 @@ def _render_scorecard_rows(pattern_details: list[dict], recommendation_narrative
         rows.append(f'  <td class="level-cell">{level}</td>')
         rows.append(f'  <td><span class="status-badge {status_css}">{status_label}</span></td>')
         rows.append(f'  <td><span class="status-badge {goal_css}">{goal_label}</span></td>')
-        rows.append(f'  <td style="font-size:12px;color:var(--text-dim)">{_esc(evidence)}</td>')
+        evidence_display = _esc(evidence) if evidence else "&mdash;"
+        rows.append(f'  <td style="font-size:12px;color:var(--text-dim)">{evidence_display}</td>')
         rows.append("</tr>")
 
     return "\n".join(rows)
