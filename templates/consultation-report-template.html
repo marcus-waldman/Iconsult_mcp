@@ -264,22 +264,7 @@ h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; }
 .status-na { background: var(--na-bg); color: var(--na); }
 
 /* TOOLTIP */
-.has-tooltip { position: relative; cursor: help; }
-.tooltip-content {
-  display: none; position: absolute; z-index: 50;
-  bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  width: 320px; padding: 16px;
-  background: var(--surface-elevated);
-  border: 1px solid var(--border-bright);
-  border-radius: 10px;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.12);
-  font-size: 13px; line-height: 1.55;
-  color: var(--text);
-  pointer-events: none;
-}
-.has-tooltip:hover .tooltip-content { display: block; }
-.tooltip-content strong { color: var(--accent); display: block; margin-bottom: 6px; }
-.tooltip-content .tt-ref { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; margin-top: 8px; display: block; }
+.has-tooltip { cursor: help; }
 
 /* MERMAID */
 .mermaid-wrap {
@@ -507,7 +492,7 @@ footer a { color: var(--accent); text-decoration: none; }
 <!-- MATURITY SCORECARD -->
 <section id="scorecard">
 <h2 class="ani">Maturity Scorecard</h2>
-<p class="subtitle">Each pattern assessed against the book's maturity model. Hover patterns for details. &mdash; = not assessed during this consultation.</p>
+<p class="subtitle">Each pattern assessed against the book's maturity model. Hover patterns for details.</p>
 
 <div class="scorecard-wrap ani">
 <table class="scorecard-table">
@@ -517,7 +502,7 @@ footer a { color: var(--accent); text-decoration: none; }
   <th style="text-align:center;">Level</th>
   <th>Status</th>
   <th>Goal</th>
-  <th>Evidence</th>
+  <th>Evidence in Codebase</th>
 </tr>
 </thead>
 <tbody>
@@ -658,6 +643,35 @@ footer a { color: var(--accent); text-decoration: none; }
       wrap.classList.remove('is-panning');
     });
   });
+
+  // Scorecard pattern tooltips (fixed positioning to avoid overflow:hidden clipping)
+  (function() {
+    var tooltip = document.getElementById('svg-tooltip');
+    if (!tooltip) return;
+    document.querySelectorAll('.has-tooltip').forEach(function(cell) {
+      cell.addEventListener('mouseenter', function() {
+        var title = cell.getAttribute('data-tt-title') || '';
+        var desc = cell.getAttribute('data-tt-desc') || '';
+        var ref = cell.getAttribute('data-tt-ref') || '';
+        if (!title && !desc) return;
+        var html = '<strong>' + title + '</strong>' + desc;
+        if (ref) html += '<span class="tt-ref">' + ref + '</span>';
+        tooltip.innerHTML = html;
+        var rect = cell.getBoundingClientRect();
+        tooltip.style.left = (rect.left + rect.width / 2) + 'px';
+        tooltip.style.top = (rect.top - 8) + 'px';
+        tooltip.style.transform = 'translate(-50%, -100%)';
+        if (rect.top - 160 < 0) {
+          tooltip.style.top = (rect.bottom + 8) + 'px';
+          tooltip.style.transform = 'translate(-50%, 0)';
+        }
+        tooltip.classList.add('visible');
+      });
+      cell.addEventListener('mouseleave', function() {
+        tooltip.classList.remove('visible');
+      });
+    });
+  })();
 
   // Attach SVG node tooltips after mermaid renders
   setTimeout(function() {

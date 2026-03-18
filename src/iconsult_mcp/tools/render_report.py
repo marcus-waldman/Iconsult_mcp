@@ -11,7 +11,8 @@ import json
 import os
 from datetime import datetime, timezone
 
-from iconsult_mcp.tools.score_architecture import score_architecture
+from iconsult_mcp.db import get_connection
+from iconsult_mcp.tools.score_architecture import score_architecture, normalize_pattern_id, _PATTERN_ID_ALIASES
 from iconsult_mcp.tools.failure_scenarios import generate_failure_scenarios
 from iconsult_mcp.tools.consultation_report import consultation_report
 
@@ -183,9 +184,43 @@ def _render_system_section(system_description: dict, agents: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _get_concept_definitions(pattern_ids: list[str]) -> dict[str, str]:
+    """Fetch concept definitions from DB for use as tooltip fallback descriptions."""
+    if not pattern_ids:
+        return {}
+    # Build lookup IDs: try both the canonical ID and the KG alias
+    all_ids = set()
+    for pid in pattern_ids:
+        all_ids.add(pid)
+        # Also try the KG alias (shorter ID) if one exists
+        if pid in _PATTERN_ID_ALIASES:
+            all_ids.add(_PATTERN_ID_ALIASES[pid])
+    try:
+        conn = get_connection()
+        placeholders = ", ".join(["?"] * len(all_ids))
+        rows = conn.execute(
+            f"SELECT id, definition FROM concepts WHERE id IN ({placeholders}) AND definition IS NOT NULL",
+            list(all_ids),
+        ).fetchall()
+        # Map back to canonical IDs
+        result: dict[str, str] = {}
+        for row_id, definition in rows:
+            canonical = normalize_pattern_id(row_id)
+            if definition:
+                result[canonical] = definition
+        return result
+    except Exception:
+        return {}
+
+
 def _render_scorecard_rows(pattern_details: list[dict], recommendation_narratives: dict | None) -> str:
     """Render <tr> rows for the scorecard table."""
     rec_narr = recommendation_narratives or {}
+
+    # Fetch concept definitions as fallback tooltip descriptions
+    pattern_ids = [p.get("pattern_id", "") for p in pattern_details]
+    concept_defs = _get_concept_definitions(pattern_ids)
+
     rows = []
     current_level = None
 
@@ -203,14 +238,11 @@ def _render_scorecard_rows(pattern_details: list[dict], recommendation_narrative
             rows.append(f"<!-- L{level} -->")
             current_level = level
 
-        # Build tooltip content
-        tooltip_detail = _esc(rec_narr.get(pid, evidence))
+        # Build tooltip data attributes (displayed via JS with fixed positioning)
+        # Priority: recommendation narrative > evidence > concept definition
+        tooltip_text = rec_narr.get(pid) or evidence or concept_defs.get(pid, "")
+        tooltip_detail = _esc(tooltip_text)
         book_ref = f"Ch. {chapter}" if chapter else ""
-        tooltip_html = (
-            f'<strong>{_esc(name)}</strong>'
-            f'{tooltip_detail}'
-            f'<span class="tt-ref">{_esc(book_ref)}</span>'
-        )
 
         # Status badges
         status_css = _STATUS_CSS.get(status, "status-na")
@@ -219,13 +251,16 @@ def _render_scorecard_rows(pattern_details: list[dict], recommendation_narrative
         goal_label = _STATUS_LABEL.get(goal, goal.title())
 
         rows.append("<tr>")
-        rows.append(f'  <td class="has-tooltip"><strong>{_esc(name)}</strong>')
-        rows.append(f'    <span class="tooltip-content">{tooltip_html}</span>')
+        rows.append(
+            f'  <td class="has-tooltip" data-tt-title="{_esc(name)}"'
+            f' data-tt-desc="{tooltip_detail}"'
+            f' data-tt-ref="{_esc(book_ref)}"><strong>{_esc(name)}</strong>'
+        )
         rows.append("  </td>")
         rows.append(f'  <td class="level-cell">{level}</td>')
         rows.append(f'  <td><span class="status-badge {status_css}">{status_label}</span></td>')
         rows.append(f'  <td><span class="status-badge {goal_css}">{goal_label}</span></td>')
-        evidence_display = _esc(evidence) if evidence else "&mdash;"
+        evidence_display = _esc(evidence) if evidence else "No evidence in codebase"
         rows.append(f'  <td style="font-size:12px;color:var(--text-dim)">{evidence_display}</td>')
         rows.append("</tr>")
 

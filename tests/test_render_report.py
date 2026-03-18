@@ -150,7 +150,7 @@ async def test_render_report_produces_valid_html(consultation_cleanup):
     # Scorecard rows have expected CSS classes
     assert "status-badge" in html
     assert "has-tooltip" in html
-    assert "tooltip-content" in html
+    assert "data-tt-title" in html
 
     # Failure chain
     assert "chain-step" in html
