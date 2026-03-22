@@ -109,20 +109,29 @@ _RATING_LABEL: dict[str, str] = {
     "mature": "Mature",
 }
 
+_RATING_ICON: dict[str, str] = {
+    "not_started": "&#x2014;",   # em dash
+    "emerging": "&#x25B2;",      # upward triangle
+    "established": "&#x2713;",   # check mark
+    "mature": "&#x2605;",        # star
+}
+
 
 def _render_maturity_banner(categories: dict) -> str:
     lines = []
     lines.append('<div class="maturity-banner ani">')
-    lines.append('  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;width:100%;">')
+    lines.append('  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;width:100%;">')
 
     for cat_key, cat in categories.items():
         rating = cat.get("rating", "not_started")
         css = _RATING_CSS.get(rating, "rating-not-started")
         label = _RATING_LABEL.get(rating, rating.title())
+        icon = _RATING_ICON.get(rating, "")
         name = cat.get("name", cat_key)
 
-        lines.append(f'    <div class="category-badge {css}" style="text-align:center;padding:12px;border-radius:8px;">')
-        lines.append(f'      <div style="font-weight:700;font-size:0.95rem;">{_esc(name)}</div>')
+        lines.append(f'    <div class="{css}" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">')
+        lines.append(f'      <div style="font-size:1.5rem;line-height:1;">{icon}</div>')
+        lines.append(f'      <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">{_esc(name)}</div>')
         lines.append(f'      <div class="status-badge {css}" style="margin-top:6px;">{_esc(label)}</div>')
         lines.append('    </div>')
 
@@ -214,7 +223,7 @@ def _get_concept_definitions(pattern_ids: list[str]) -> dict[str, str]:
 
 
 def _render_scorecard_rows(categories: dict, recommendation_narratives: dict | None) -> str:
-    """Render <tr> rows for the scorecard table, grouped by category."""
+    """Render separate scorecard tables per category."""
     rec_narr = recommendation_narratives or {}
 
     # Collect all pattern IDs for tooltip lookup
@@ -225,19 +234,41 @@ def _render_scorecard_rows(categories: dict, recommendation_narratives: dict | N
                 all_pids.append(p.get("pattern_id", ""))
     concept_defs = _get_concept_definitions(all_pids)
 
-    rows = []
+    sections = []
 
     for cat_key, cat in categories.items():
         rating = cat.get("rating", "not_started")
         rating_css = _RATING_CSS.get(rating, "rating-not-started")
         rating_label = _RATING_LABEL.get(rating, rating.title())
+        rating_icon = _RATING_ICON.get(rating, "")
+        cat_name = cat.get("name", cat_key)
 
-        # Category header row
-        rows.append(f'<tr class="category-header">')
-        rows.append(f'  <td colspan="4"><strong>{_esc(cat.get("name", cat_key))}</strong>')
-        rows.append(f'    <span class="status-badge {rating_css}" style="margin-left:8px;">{_esc(rating_label)}</span>')
-        rows.append(f'  </td>')
-        rows.append('</tr>')
+        # Check if category has any patterns
+        has_patterns = any(
+            lv.get("patterns")
+            for lv in cat.get("levels", {}).values()
+        )
+        if not has_patterns:
+            continue
+
+        lines = []
+        lines.append('<div class="cat-scorecard ani">')
+
+        # Category header
+        lines.append('  <div class="cat-scorecard-header">')
+        lines.append(f'    <h3>{_esc(cat_name)}</h3>')
+        lines.append(f'    <span class="status-badge {rating_css}">{rating_icon} {_esc(rating_label)}</span>')
+        lines.append('  </div>')
+
+        # Table
+        lines.append('  <div class="cat-scorecard-body">')
+        lines.append('  <table class="scorecard-table">')
+        lines.append('  <thead><tr>')
+        lines.append('    <th>Pattern</th>')
+        lines.append('    <th style="text-align:center;">Level</th>')
+        lines.append('    <th>Status</th>')
+        lines.append('  </tr></thead>')
+        lines.append('  <tbody>')
 
         for level_name in ("basic", "intermediate", "advanced"):
             level_data = cat.get("levels", {}).get(level_name, {})
@@ -249,39 +280,47 @@ def _render_scorecard_rows(categories: dict, recommendation_narratives: dict | N
                 pid = p.get("pattern_id", "")
                 name = p.get("pattern_name", pid)
                 status = p.get("status", "not_assessed")
-                met = p.get("met", False)
                 evidence = p.get("evidence", "")
 
-                # Tooltip
+                # Build tooltip from evidence / narratives / concept defs
                 tooltip_text = rec_narr.get(pid) or evidence or concept_defs.get(pid, "")
                 tooltip_detail = _esc(tooltip_text)
                 book_ref = f"Ch. {cat.get('chapter', '')}"
 
-                # Status badge
+                # Status badge with tooltip on hover
                 status_css = _STATUS_CSS.get(status, "status-na")
                 status_label = _STATUS_LABEL.get(status, status.title())
 
-                # Indicator summary
+                # Indicator summary appended to status
                 ind_summary = p.get("indicator_summary")
                 ind_text = ""
                 if ind_summary:
-                    ind_text = f'{ind_summary["met"]}/{ind_summary["total"]}'
+                    ind_text = f' ({ind_summary["met"]}/{ind_summary["total"]})'
 
-                rows.append("<tr>")
-                rows.append(
-                    f'  <td class="has-tooltip" data-tt-title="{_esc(name)}"'
+                lines.append('  <tr>')
+                lines.append(
+                    f'    <td class="has-tooltip" data-tt-title="{_esc(name)}"'
                     f' data-tt-desc="{tooltip_detail}"'
                     f' data-tt-ref="{_esc(book_ref)}">'
                     f'<strong>{_esc(name)}</strong></td>'
                 )
-                rows.append(f'  <td class="level-cell">{_esc(level_name.title())}</td>')
-                rows.append(f'  <td><span class="status-badge {status_css}">{status_label}</span></td>')
-                evidence_display = _esc(evidence) if evidence else "&mdash;"
-                ind_html = f' <span style="font-size:11px;color:var(--text-dim);">({ind_text})</span>' if ind_text else ""
-                rows.append(f'  <td style="font-size:12px;color:var(--text-dim)">{evidence_display}{ind_html}</td>')
-                rows.append("</tr>")
+                lines.append(f'    <td class="level-cell">{_esc(level_name.title())}</td>')
+                # Status badge — evidence shown via tooltip on hover
+                lines.append(
+                    f'    <td><span class="status-badge {status_css} has-tooltip"'
+                    f' data-tt-title="{_esc(name)}: {status_label}"'
+                    f' data-tt-desc="{tooltip_detail}"'
+                    f' data-tt-ref="{_esc(book_ref)}"'
+                    f'>{status_label}{_esc(ind_text)}</span></td>'
+                )
+                lines.append('  </tr>')
 
-    return "\n".join(rows)
+        lines.append('  </tbody></table>')
+        lines.append('  </div>')
+        lines.append('</div>')
+        sections.append("\n".join(lines))
+
+    return "\n".join(sections)
 
 
 def _render_diagrams(
@@ -326,25 +365,42 @@ def _render_tooltip_scripts(tooltips_current: dict, tooltips_target: dict) -> st
     return "\n".join(lines)
 
 
-def _render_recommendations(roadmap: list[dict], recommendation_narratives: dict | None) -> str:
-    """Render phased recommendation cards grouped by category."""
+def _render_recommendations(
+    roadmap: list[dict],
+    recommendation_narratives: dict | None,
+    concept_defs: dict[str, str] | None = None,
+) -> str:
+    """Render phased recommendation cards grouped by category.
+
+    Each card includes: what the pattern is (concept def), why it matters
+    (missing indicators / narrative), and where to start (book ref).
+    """
     rec_narr = recommendation_narratives or {}
+    cdefs = concept_defs or {}
 
     lines = []
     for phase in roadmap:
         phase_num = phase.get("phase", 1)
         cat_name = phase.get("category_name", "")
         current_rating = phase.get("current_rating", "")
-        phase_css = _PHASE_CSS.get(phase_num, "phase-3")
+        phase_css = _PHASE_CSS.get(min(phase_num, 3), "phase-3")
+        rating_css = _RATING_CSS.get(current_rating, "rating-not-started")
+        rating_label = _RATING_LABEL.get(current_rating, current_rating)
 
         lines.append(f'<div class="rec-phase {phase_css} ani">')
-        lines.append(f'  <div class="phase-header">Phase {phase_num}: {_esc(cat_name)}</div>')
+        lines.append(
+            f'  <div class="phase-header">Phase {phase_num}: {_esc(cat_name)}'
+            f'  <span class="status-badge {rating_css}" style="margin-left:8px;font-size:11px;">'
+            f'Currently {_esc(rating_label)}</span></div>'
+        )
         lines.append('  <div class="rec-cards">')
 
         for pattern in phase.get("patterns", []):
             pname = pattern.get("name", "")
             severity = pattern.get("severity", "")
             level = pattern.get("level", "")
+            status = pattern.get("status", "missing")
+            missing_inds = pattern.get("missing_indicators", [])
 
             # Priority badge
             badge = ""
@@ -353,18 +409,29 @@ def _render_recommendations(roadmap: list[dict], recommendation_narratives: dict
             elif severity in ("WARNING", "HIGH"):
                 badge = ' <span class="priority-badge priority-high">High</span>'
 
-            # Description from Claude narratives
-            desc = rec_narr.get(pname, "")
+            # What is this pattern? (concept definition)
+            pattern_id = pattern.get("pattern_id", "")
+            what_text = rec_narr.get(pattern_id) or rec_narr.get(pname) or cdefs.get(pattern_id, "")
 
-            # Missing indicators
-            missing_inds = pattern.get("missing_indicators", [])
-            if missing_inds and not desc:
-                desc = "Missing: " + "; ".join(missing_inds[:3])
+            # Why is it needed? (missing indicators)
+            why_items = []
+            if missing_inds:
+                for ind in missing_inds[:4]:
+                    why_items.append(f'<li>{_esc(ind)}</li>')
 
             lines.append('    <div class="rec-card">')
             lines.append(f'      <h4>{_esc(pname)}{badge}</h4>')
-            lines.append(f'      <p style="font-size:12px;color:var(--text-dim);">{_esc(level.title())}</p>')
-            lines.append(f'      <p>{_esc(desc)}</p>')
+            lines.append(f'      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">{_esc(level.title())} pattern</div>')
+
+            if what_text:
+                lines.append(f'      <p>{_esc(what_text)}</p>')
+
+            if why_items:
+                lines.append('      <div style="margin-top:8px;">')
+                lines.append('        <div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:4px;">Indicators to address:</div>')
+                lines.append(f'        <ul style="margin:0;padding-left:18px;font-size:0.85rem;">{"".join(why_items)}</ul>')
+                lines.append('      </div>')
+
             lines.append('    </div>')
 
         lines.append('  </div>')
@@ -538,6 +605,10 @@ async def render_report(
     scenarios = scenario_data.get("scenarios", [])
     failure_chain = scenario_data.get("failure_chain", {})
 
+    # Fetch concept definitions for recommendation cards
+    gap_pids = [g["pattern_id"] for phase in roadmap for g in phase.get("patterns", [])]
+    concept_defs = _get_concept_definitions(gap_pids)
+
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # -----------------------------------------------------------------------
@@ -560,7 +631,7 @@ async def render_report(
         "system_section": _render_system_section(system_description, agents),
         "scorecard_rows": _render_scorecard_rows(categories, recommendation_narratives),
         "diagrams": _render_diagrams(diagram_current, diagram_target, tooltips_current, tooltips_target),
-        "recommendations": _render_recommendations(roadmap, recommendation_narratives),
+        "recommendations": _render_recommendations(roadmap, recommendation_narratives, concept_defs),
         "failure_chain": _render_failure_chain(failure_chain),
         "stress_test": _render_stress_test(scenarios),
         "footer": _render_footer(consultation_id, date),

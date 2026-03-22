@@ -367,6 +367,7 @@ def _compute_roadmap(
             "current_rating": category_ratings[cat_key]["rating"],
             "patterns": [
                 {
+                    "pattern_id": g["pattern_id"],
                     "name": g["pattern_name"],
                     "level": g["level"],
                     "status": g["status"],

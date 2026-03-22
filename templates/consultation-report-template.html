@@ -263,6 +263,31 @@ h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; }
 .status-missing { background: var(--missing-bg); color: var(--missing); }
 .status-na { background: var(--na-bg); color: var(--na); }
 
+/* CATEGORY RATING BADGES */
+.rating-mature { background: var(--implemented-bg); color: var(--implemented); }
+.rating-established { background: var(--blue-dim); color: var(--blue); }
+.rating-emerging { background: var(--amber-dim); color: var(--amber); }
+.rating-not-started { background: var(--na-bg); color: var(--na); }
+
+/* CATEGORY SCORECARD TABLES */
+.cat-scorecard { margin-top: 20px; }
+.cat-scorecard-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+  border-bottom: 2px solid var(--border-bright);
+}
+.cat-scorecard-header h3 { margin: 0; font-size: 1rem; }
+.cat-scorecard-body {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+}
+
 /* TOOLTIP */
 .has-tooltip { cursor: help; }
 
@@ -455,8 +480,8 @@ footer a { color: var(--accent); text-decoration: none; }
 <nav class="nav">
   <div class="nav-inner">
     <a href="#brief">Brief</a>
-    <a href="#maturity">Maturity</a>
     <a href="#system">System</a>
+    <a href="#maturity">Maturity</a>
     <a href="#scorecard">Scorecard</a>
     <a href="#architecture">Architecture</a>
     <a href="#recommendations">Recommendations</a>
@@ -477,39 +502,23 @@ footer a { color: var(--accent); text-decoration: none; }
 <!-- SLOT:exec_brief -->
 </div>
 
-<!-- MATURITY BANNER -->
-<section id="maturity">
-<h2 class="ani">Maturity Assessment</h2>
-<!-- SLOT:maturity_banner -->
-</section>
-
 <!-- SYSTEM UNDER REVIEW -->
 <section id="system">
 <h2 class="ani">System Under Review</h2>
 <!-- SLOT:system_section -->
 </section>
 
+<!-- MATURITY BANNER -->
+<section id="maturity">
+<h2 class="ani">Maturity Assessment</h2>
+<!-- SLOT:maturity_banner -->
+</section>
+
 <!-- MATURITY SCORECARD -->
 <section id="scorecard">
 <h2 class="ani">Maturity Scorecard</h2>
-<p class="subtitle">Each pattern assessed against the book's maturity model. Hover patterns for details.</p>
-
-<div class="scorecard-wrap ani">
-<table class="scorecard-table">
-<thead>
-<tr>
-  <th>Pattern</th>
-  <th style="text-align:center;">Level</th>
-  <th>Status</th>
-  <th>Goal</th>
-  <th>Evidence in Codebase</th>
-</tr>
-</thead>
-<tbody>
+<p class="subtitle">Each pattern assessed against the Ch. 12 rubric. Hover status badges for evidence.</p>
 <!-- SLOT:scorecard_rows -->
-</tbody>
-</table>
-</div>
 </section>
 
 <!-- ARCHITECTURE DIAGRAMS -->
