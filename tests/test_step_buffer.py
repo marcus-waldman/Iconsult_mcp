@@ -178,11 +178,11 @@ async def test_end_to_end_buffer_with_scoring(consultation_cleanup):
     cid = consultation_cleanup(result["consultation_id"])
 
     assessments = [
-        {"pattern_id": "retry", "pattern_name": "Retry Pattern", "status": "implemented", "maturity_level": 3},
-        {"pattern_id": "human-in-the-loop", "pattern_name": "Human-in-the-Loop", "status": "implemented", "maturity_level": 4},
-        {"pattern_id": "supervisor", "pattern_name": "Supervisor Pattern", "status": "partial", "maturity_level": 2},
-        {"pattern_id": "guardrails", "pattern_name": "Guardrails", "status": "missing", "maturity_level": 1},
-        {"pattern_id": "consensus", "pattern_name": "Consensus Pattern", "status": "not_applicable", "maturity_level": 1},
+        {"pattern_id": "simple_retry", "pattern_name": "Simple Retry", "status": "implemented", "maturity_level": 1},
+        {"pattern_id": "agent_calls_human", "pattern_name": "Agent Calls Human", "status": "implemented", "maturity_level": 1},
+        {"pattern_id": "supervisor_architecture", "pattern_name": "Supervisor Architecture", "status": "partial", "maturity_level": 1},
+        {"pattern_id": "watchdog_timeout", "pattern_name": "Watchdog Timeout", "status": "missing", "maturity_level": 1},
+        {"pattern_id": "consensus_and_negotiation", "pattern_name": "Consensus", "status": "not_applicable", "maturity_level": 1},
     ]
     for pa in assessments:
         log_consultation_step(cid, "pattern_assessment", pa)
@@ -197,5 +197,5 @@ async def test_end_to_end_buffer_with_scoring(consultation_cleanup):
     # Buffer should be empty now
     assert len(get_pending_steps(cid)) == 0
 
-    # Should have found all 5 assessments
-    assert score["pattern_coverage"]["total_assessed"] == 5
+    # Should have found all 5 rubric pattern assessments
+    assert score["overall_summary"]["total_assessed"] == 5

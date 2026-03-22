@@ -270,7 +270,5 @@ async def test_render_report_maturity_data(consultation_cleanup):
             **MOCK_NARRATIVES,
         )
 
-    assert "maturity" in output
-    assert "current" in output["maturity"]
-    assert "target" in output["maturity"]
-    assert output["patterns_rendered"] > 0
+    assert "categories_rendered" in output
+    assert output["categories_rendered"] > 0

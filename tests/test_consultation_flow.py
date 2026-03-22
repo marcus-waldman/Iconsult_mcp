@@ -67,11 +67,11 @@ async def test_full_consultation_flow(consultation_cleanup):
     # Step 5b: Score architecture
     score = await score_architecture(cid)
     assert "error" not in score
-    assert score["maturity"]["current_level"] >= 0
-    assert "pattern_coverage" in score
-    # Verify goal field exists in coverage details
-    for detail in score["pattern_coverage"]["details"]:
-        assert "goal" in detail
+    assert "categories" in score
+    assert "overall_summary" in score
+    # Verify each category has a rating
+    for cat in score["categories"].values():
+        assert cat["rating"] in ("not_started", "emerging", "established", "mature")
 
     # Step 6: Verify synthesis data is available
     # All the data needed for synthesis should be present

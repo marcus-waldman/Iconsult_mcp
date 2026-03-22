@@ -36,23 +36,19 @@ async def test_score_produces_valid_output(case, consultation_cleanup):
     assert "error" not in score, score.get("error")
     assert score["consultation_id"] == cid
 
-    # Structure checks
-    assert "maturity" in score
-    assert "current_level" in score["maturity"]
-    assert 0 <= score["maturity"]["current_level"] <= 6
-
-    assert "overall_score" not in score
-    assert "dimension_scores" not in score
-
-    assert "pattern_coverage" in score
+    # New category-based structure
+    assert "categories" in score
+    assert "overall_summary" in score
     assert "gap_analysis" in score
     assert "roadmap" in score
+    assert "coverage_warnings" in score
 
-    # Every pattern in coverage details must have goal and phase fields
-    for detail in score["pattern_coverage"]["details"]:
-        assert "goal" in detail, f"Missing goal for {detail['pattern_id']}"
-        assert detail["goal"] in ("implemented", "partial", "missing", "not_applicable")
-        assert "phase" in detail, f"Missing phase for {detail['pattern_id']}"
+    # Each category has expected fields
+    for cat_key, cat in score["categories"].items():
+        assert "name" in cat
+        assert "rating" in cat
+        assert cat["rating"] in ("not_started", "emerging", "established", "mature")
+        assert "levels" in cat
 
 
 @pytest.mark.asyncio
@@ -71,8 +67,11 @@ async def test_score_determinism(consultation_cleanup):
         score = await score_architecture(cid)
         scores.append(score)
 
-    assert scores[0]["maturity"]["current_level"] == scores[1]["maturity"]["current_level"]
-    assert scores[0]["pattern_coverage"] == scores[1]["pattern_coverage"]
+    # Category ratings should be identical
+    for cat_key in scores[0]["categories"]:
+        assert scores[0]["categories"][cat_key]["rating"] == scores[1]["categories"][cat_key]["rating"]
+
+    assert scores[0]["overall_summary"] == scores[1]["overall_summary"]
 
 
 @pytest.mark.asyncio
@@ -88,7 +87,7 @@ async def test_score_empty_consultation_errors(consultation_cleanup):
 
 @pytest.mark.asyncio
 async def test_score_gap_analysis_flags_missing(consultation_cleanup):
-    """Gap analysis identifies missing patterns needed for next level."""
+    """Gap analysis identifies missing patterns."""
     case = SCORE_CASES[0]
 
     result = await match_concepts(case["description"], max_results=5)
@@ -99,21 +98,16 @@ async def test_score_gap_analysis_flags_missing(consultation_cleanup):
 
     score = await score_architecture(cid)
 
-    if score["maturity"]["current_level"] < 6:
-        # There should be gaps identified for the target level
-        # (unless the case happens to have everything implemented)
-        missing_count = sum(
-            1 for pa in case["pattern_assessments"] if pa["status"] == "missing"
-        )
-        if missing_count > 0:
-            assert len(score["gap_analysis"]) > 0 or score["maturity"]["current_level"] > 0, (
-                "Should identify gaps when patterns are missing"
-            )
+    missing_count = sum(
+        1 for pa in case["pattern_assessments"] if pa["status"] == "missing"
+    )
+    if missing_count > 0:
+        assert len(score["gap_analysis"]) > 0, "Should identify gaps when patterns are missing"
 
 
 @pytest.mark.asyncio
-async def test_not_applicable_does_not_block_level(consultation_cleanup):
-    """Patterns marked not_applicable should not block maturity level progression."""
+async def test_not_applicable_does_not_block_rating(consultation_cleanup):
+    """Patterns marked not_applicable should not block category rating progression."""
     from tests.cases import CASES_BY_ID
     case = CASES_BY_ID["research_bot"]
 
@@ -126,72 +120,31 @@ async def test_not_applicable_does_not_block_level(consultation_cleanup):
     score = await score_architecture(cid)
     assert "error" not in score, score.get("error")
 
-    # research_bot has agent_calls_human as not_applicable — should not block L1
-    # It still has watchdog_timeout as missing, so it won't fully pass L1,
-    # but the N/A pattern itself should not be counted as a blocker
-    l1_details = score["maturity"]["level_details"][1]
-    human_pattern = next(
-        p for p in l1_details["patterns"] if p["id"] == "agent_calls_human_pattern"
-    )
-    assert human_pattern["status"] == "not_applicable"
-
     # N/A should not appear in gap analysis
     gap_ids = [g["pattern_id"] for g in score["gap_analysis"]]
-    assert "agent_calls_human_pattern" not in gap_ids
-
-    # N/A count should be tracked
-    assert score["pattern_coverage"]["not_applicable"] >= 1
+    for pa in case["pattern_assessments"]:
+        if pa["status"] == "not_applicable":
+            pid = pa["pattern_id"]
+            assert pid not in gap_ids, f"N/A pattern {pid} should not appear in gaps"
 
 
 @pytest.mark.asyncio
-async def test_not_applicable_goal_preserved(consultation_cleanup):
-    """Patterns marked not_applicable should have goal='not_applicable'."""
-    from tests.cases import CASES_BY_ID
-    case = CASES_BY_ID["research_bot"]
-
-    result = await match_concepts(case["description"], max_results=5)
+async def test_coverage_warnings_for_unassessed_categories(consultation_cleanup):
+    """Categories with no assessments should trigger coverage warnings."""
+    result = await match_concepts("Simple retry-only system", max_results=3)
     cid = consultation_cleanup(result["consultation_id"])
 
-    for pa in case["pattern_assessments"]:
-        log_consultation_step(cid, "pattern_assessment", pa)
+    # Only assess robustness patterns
+    log_consultation_step(cid, "pattern_assessment", {
+        "pattern_id": "watchdog_timeout",
+        "pattern_name": "Watchdog Timeout",
+        "status": "implemented",
+        "evidence": "test",
+        "maturity_level": 1,
+    })
 
     score = await score_architecture(cid)
+    assert "error" not in score
 
-    na_details = [
-        d for d in score["pattern_coverage"]["details"]
-        if d["status"] == "not_applicable"
-    ]
-    assert len(na_details) >= 1
-    for d in na_details:
-        assert d["goal"] == "not_applicable"
-        assert d["priority"] == "---"
-
-
-@pytest.mark.asyncio
-async def test_phase_field_assigned_correctly(consultation_cleanup):
-    """Phase field should align patterns with their implementation roadmap phase."""
-    from tests.cases import CASES_BY_ID
-    case = CASES_BY_ID["research_bot"]
-
-    result = await match_concepts(case["description"], max_results=5)
-    cid = consultation_cleanup(result["consultation_id"])
-
-    for pa in case["pattern_assessments"]:
-        log_consultation_step(cid, "pattern_assessment", pa)
-
-    score = await score_architecture(cid)
-    current = score["maturity"]["current_level"]
-
-    for detail in score["pattern_coverage"]["details"]:
-        if detail["status"] in ("implemented", "not_applicable"):
-            # Already done patterns have no phase
-            assert detail["phase"] is None, (
-                f"{detail['pattern_name']} is {detail['status']} but has phase={detail['phase']}"
-            )
-        elif detail["phase"] is not None:
-            # Phase should be level - current_level (1-based offset)
-            expected_phase = detail["maturity_level"] - current
-            assert detail["phase"] == expected_phase, (
-                f"{detail['pattern_name']} at L{detail['maturity_level']} should be phase "
-                f"{expected_phase}, got {detail['phase']}"
-            )
+    # Should have warnings for unassessed categories
+    assert len(score["coverage_warnings"]) > 0

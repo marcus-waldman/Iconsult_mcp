@@ -6,8 +6,8 @@ and book-derived scenario templates.
 """
 
 from iconsult_mcp.db import get_consultation, get_concept_relationships
+from iconsult_mcp.tools.rubric_data import RUBRIC, normalize_pattern_id, _PATTERN_ID_ALIAS_COMBINED
 from iconsult_mcp.tools.score_architecture import (
-    MATURITY_MODEL,
     PATTERN_METRICS,
     _get_pattern_assessments,
 )
@@ -19,7 +19,7 @@ from iconsult_mcp.tools.score_architecture import (
 FAILURE_CHAIN: list[dict] = [
     {
         "step": 1,
-        "pattern_id": "adaptive_retry_pattern",
+        "pattern_id": "simple_retry",
         "pattern_name": "Simple Retry",
         "action": "Agent encounters API/LLM call failure",
         "recovery": "Retry with exponential backoff",
@@ -28,7 +28,7 @@ FAILURE_CHAIN: list[dict] = [
     },
     {
         "step": 2,
-        "pattern_id": "auto_healing_pattern",
+        "pattern_id": "auto_healing_agent_resuscitation",
         "pattern_name": "Auto-Healing Agent Resuscitation",
         "action": "Retries exhausted, agent process stopped",
         "recovery": "Automatically restart the agent process",
@@ -37,7 +37,7 @@ FAILURE_CHAIN: list[dict] = [
     },
     {
         "step": 3,
-        "pattern_id": "fallback_model_invocation_pattern",
+        "pattern_id": "fallback_model_invocation",
         "pattern_name": "Fallback Model Invocation",
         "action": "Agent still unsuccessful after restart",
         "recovery": "Switch to fallback model or redundant agent",
@@ -46,7 +46,7 @@ FAILURE_CHAIN: list[dict] = [
     },
     {
         "step": 4,
-        "pattern_id": "agent_calls_human_pattern",
+        "pattern_id": "agent_calls_human",
         "pattern_name": "Delayed Escalation / Agent Calls Human",
         "action": "All automated recovery paths exhausted",
         "recovery": "Escalate to human operator with full context",
@@ -55,7 +55,7 @@ FAILURE_CHAIN: list[dict] = [
     },
     {
         "step": 5,
-        "pattern_id": "watchdog_timeout_pattern",
+        "pattern_id": "watchdog_timeout",
         "pattern_name": "Watchdog Timeout Supervisor",
         "action": "Agent becomes unresponsive or enters infinite loop",
         "recovery": "Timeout terminates unresponsive agent, alerts system",
@@ -327,20 +327,27 @@ PATTERN_FAILURE_TEMPLATES: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 def _get_all_model_pattern_ids() -> set[str]:
-    """All pattern IDs in MATURITY_MODEL."""
+    """All pattern IDs in RUBRIC."""
     ids = set()
-    for patterns in MATURITY_MODEL.values():
-        for p in patterns:
-            ids.add(p["id"])
+    for cat in RUBRIC.values():
+        for level_patterns in cat["levels"].values():
+            for p in level_patterns:
+                ids.add(p["id"])
     return ids
 
 
+# Level priority for severity computation (basic=1, intermediate=2, advanced=3)
+_LEVEL_PRIORITY = {"basic": 1, "intermediate": 2, "advanced": 3}
+
+
 def _get_pattern_level(pattern_id: str) -> int | None:
-    """Look up the maturity level for a pattern ID."""
-    for level, patterns in MATURITY_MODEL.items():
-        for p in patterns:
-            if p["id"] == pattern_id:
-                return level
+    """Look up the maturity level for a pattern ID (1=basic, 2=intermediate, 3=advanced)."""
+    pid = normalize_pattern_id(pattern_id)
+    for cat in RUBRIC.values():
+        for level_name, level_patterns in cat["levels"].items():
+            for p in level_patterns:
+                if p["id"] == pid:
+                    return _LEVEL_PRIORITY.get(level_name)
     return None
 
 
@@ -425,8 +432,8 @@ def _compute_severity(
     """Compute scenario severity based on dependencies and pattern importance."""
     # Security/compliance patterns are always CRITICAL
     if pattern_id in (
-        "instruction_fidelity_auditing_pattern",
-        "agent_authentication_and_authorization",
+        "instruction_fidelity_auditing",
+        "agent_auth_and_authz",
     ):
         return "CRITICAL"
 
@@ -455,6 +462,11 @@ def _build_failure_chain_coverage(
     for link in FAILURE_CHAIN:
         pid = link["pattern_id"]
         assessment = assessments.get(pid)
+        if not assessment:
+            # Try alias
+            alias = _PATTERN_ID_ALIAS_COMBINED.get(pid)
+            if alias:
+                assessment = assessments.get(alias)
         status = assessment["status"] if assessment else "not_assessed"
 
         is_covered = status in ("implemented", "partial")
@@ -531,90 +543,99 @@ async def generate_failure_scenarios(
     # Build scenarios for missing/partial patterns
     scenarios = []
 
-    for level in sorted(MATURITY_MODEL.keys()):
-        for pattern in MATURITY_MODEL[level]:
-            pid = pattern["id"]
-            assessment = assessments.get(pid)
-            status = assessment["status"] if assessment else "not_assessed"
+    for cat_key, cat in RUBRIC.items():
+        for level_name, level_patterns in cat["levels"].items():
+            for pattern in level_patterns:
+                pid = pattern["id"]
+                assessment = assessments.get(pid)
+                status = assessment["status"] if assessment else "not_assessed"
 
-            # Only build scenarios for missing/partial patterns
-            if status not in ("missing", "partial"):
-                continue
+                # Only build scenarios for missing/partial patterns
+                if status not in ("missing", "partial"):
+                    continue
 
-            template = PATTERN_FAILURE_TEMPLATES.get(pid)
-            if not template:
-                continue
+                template = PATTERN_FAILURE_TEMPLATES.get(pid)
+                if not template:
+                    # Try alias (templates may use old MATURITY_MODEL IDs)
+                    alias = _PATTERN_ID_ALIAS_COMBINED.get(pid)
+                    if alias:
+                        template = PATTERN_FAILURE_TEMPLATES.get(alias)
+                if not template:
+                    continue
 
-            # Find implemented patterns that depend on this missing one
-            dependents = _find_dependent_patterns(pid, assessments)
+                # Find implemented patterns that depend on this missing one
+                dependents = _find_dependent_patterns(pid, assessments)
 
-            # Determine mode
-            failure_context = assessment.get("failure_context", {}) if assessment else {}
-            has_code = bool(failure_context.get("code_refs"))
-            mode = "code_grounded" if has_code else "book_grounded"
+                # Determine mode
+                failure_context = assessment.get("failure_context", {}) if assessment else {}
+                has_code = bool(failure_context.get("code_refs"))
+                mode = "code_grounded" if has_code else "book_grounded"
 
-            # Build cascade steps
-            cascade_steps = _build_cascade_steps(pid, template, assessment)
+                # Build cascade steps
+                cascade_steps = _build_cascade_steps(pid, template, assessment)
 
-            # Severity
-            severity = _compute_severity(pid, dependents, level)
+                # Severity
+                level_num = _LEVEL_PRIORITY.get(level_name, 2)
+                severity = _compute_severity(pid, dependents, level_num)
 
-            # Build the scenario
-            scenario = {
-                "scenario_id": len(scenarios) + 1,
-                "title": f"{'Without ' if status == 'missing' else 'Strengthening '}{pattern['name']} → {template['trigger']}",
-                "trigger": template["trigger"],
-                "missing_pattern": {
-                    "id": pid,
-                    "name": pattern["name"],
-                    "status": status,
-                    "maturity_level": level,
-                    "chapter": pattern["chapter"],
-                },
-                "severity": severity,
-                "cascade_steps": cascade_steps,
-                "book_reference": template["book_ref"],
-                "mode": mode,
-            }
-
-            # Add recovery recommendation
-            metric = PATTERN_METRICS.get(pid)
-            if metric:
-                scenario["recovery"] = (
-                    f"Implement {pattern['name']} "
-                    f"(target: {metric['metric']}; {metric['source']})"
-                )
-            else:
-                scenario["recovery"] = (
-                    f"Implement {pattern['name']} "
-                    f"(Ch. {pattern['chapter']})"
-                )
-
-            # Add evidence from assessment
-            if assessment and assessment.get("evidence"):
-                scenario["evidence"] = assessment["evidence"]
-
-            # Add failure_context details if present
-            if failure_context.get("failure_mode"):
-                scenario["failure_mode_detail"] = failure_context["failure_mode"]
-
-            # Flag inverted pyramid: advanced pattern depends on this missing foundation
-            if dependents:
-                scenario["inverted_pyramid"] = {
-                    "warning": (
-                        f"{pattern['name']} (L{level}) is not yet in place — "
-                        f"these higher-level patterns would benefit from it as a foundation"
-                    ),
-                    "affected_patterns": dependents,
+                # Build the scenario
+                scenario = {
+                    "scenario_id": len(scenarios) + 1,
+                    "title": f"{'Without ' if status == 'missing' else 'Strengthening '}{pattern['name']} → {template['trigger']}",
+                    "trigger": template["trigger"],
+                    "missing_pattern": {
+                        "id": pid,
+                        "name": pattern["name"],
+                        "status": status,
+                        "category": cat_key,
+                        "level": level_name,
+                        "chapter": cat["chapter"],
+                    },
+                    "severity": severity,
+                    "cascade_steps": cascade_steps,
+                    "book_reference": template["book_ref"],
+                    "mode": mode,
                 }
 
-            scenarios.append(scenario)
+                # Add recovery recommendation
+                metric = PATTERN_METRICS.get(pid)
+                if metric:
+                    scenario["recovery"] = (
+                        f"Implement {pattern['name']} "
+                        f"(target: {metric['metric']}; {metric['source']})"
+                    )
+                else:
+                    scenario["recovery"] = (
+                        f"Implement {pattern['name']} "
+                        f"(Ch. {cat['chapter']})"
+                    )
 
-    # Sort: CRITICAL first, then WARNING, then INFO; within same severity, lower level first
+                # Add evidence from assessment
+                if assessment and assessment.get("evidence"):
+                    scenario["evidence"] = assessment["evidence"]
+
+                # Add failure_context details if present
+                if failure_context.get("failure_mode"):
+                    scenario["failure_mode_detail"] = failure_context["failure_mode"]
+
+                # Flag inverted pyramid: advanced pattern depends on this missing foundation
+                if dependents:
+                    scenario["inverted_pyramid"] = {
+                        "warning": (
+                            f"{pattern['name']} ({level_name}) is not yet in place — "
+                            f"these higher-level patterns would benefit from it as a foundation"
+                        ),
+                        "affected_patterns": dependents,
+                    }
+
+                scenarios.append(scenario)
+
+    # Sort: CRITICAL first, then WARNING, then INFO; within same severity, basic first
     severity_order = {"CRITICAL": 0, "WARNING": 1, "INFO": 2}
+    level_order = {"basic": 0, "intermediate": 1, "advanced": 2}
     scenarios.sort(key=lambda s: (
         severity_order.get(s["severity"], 3),
-        s["missing_pattern"]["maturity_level"],
+        level_order.get(s["missing_pattern"].get("level", ""), 9),
     ))
 
     # Truncate

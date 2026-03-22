@@ -15,10 +15,10 @@ from iconsult_mcp.db import (
     upsert_implementation_plan,
     get_implementation_plan_record,
 )
+from iconsult_mcp.tools.rubric_data import RUBRIC, normalize_pattern_id, get_pattern_level
 from iconsult_mcp.tools.score_architecture import (
-    MATURITY_MODEL,
     _get_pattern_assessments,
-    _compute_maturity_level,
+    _compute_category_ratings,
     _compute_gap_analysis,
     _compute_roadmap,
 )
@@ -29,18 +29,17 @@ from iconsult_mcp.tools.failure_scenarios import PATTERN_FAILURE_TEMPLATES
 # ---------------------------------------------------------------------------
 
 MECHANICAL_PATTERN_IDS = frozenset({
-    "adaptive_retry_pattern",
-    "watchdog_timeout_pattern",
-    "function_calling_pattern",
-    "auto_healing_pattern",
-    "fallback_model_invocation_pattern",
-    # KG aliases for the above
     "simple_retry",
     "watchdog_timeout",
-    "function_calling",
+    "auto_healing_agent_resuscitation",
+    "fallback_model_invocation",
+    "rate_limited_invocation",
+    "incremental_checkpointing",
+    "basic_audit_logging",
 })
 
-DESIGN_DECISION_MIN_LEVEL = 4
+# Patterns at "advanced" level are design decisions by default
+DESIGN_DECISION_LEVEL = "advanced"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -72,28 +71,31 @@ def _classify_step_type(
     if alternative_edges:
         return "design_decision"
 
-    # Check maturity level
-    for level, patterns in MATURITY_MODEL.items():
-        for p in patterns:
-            if p["id"] == pattern_id and level >= DESIGN_DECISION_MIN_LEVEL:
-                return "design_decision"
+    # Check if advanced level → design decision
+    level = get_pattern_level(pattern_id)
+    if level == DESIGN_DECISION_LEVEL:
+        return "design_decision"
 
     return "design_decision"
 
 
 def _get_book_ref(pattern_id: str) -> dict:
-    """Look up chapter from MATURITY_MODEL and page from PATTERN_FAILURE_TEMPLATES."""
+    """Look up chapter from RUBRIC and page from PATTERN_FAILURE_TEMPLATES."""
+    pid = normalize_pattern_id(pattern_id)
     chapter = None
-    for level, patterns in MATURITY_MODEL.items():
-        for p in patterns:
-            if p["id"] == pattern_id:
-                chapter = p["chapter"]
+    for cat in RUBRIC.values():
+        for level_patterns in cat["levels"].values():
+            for p in level_patterns:
+                if p["id"] == pid:
+                    chapter = cat["chapter"]
+                    break
+            if chapter is not None:
                 break
         if chapter is not None:
             break
 
     page = None
-    template = PATTERN_FAILURE_TEMPLATES.get(pattern_id)
+    template = PATTERN_FAILURE_TEMPLATES.get(pid)
     if template and "book_ref" in template:
         page = template["book_ref"].get("page")
 
@@ -203,8 +205,6 @@ def _compute_summary(phases: list[dict]) -> dict:
 def _build_plan_json(
     consultation_id: str,
     assessments: dict[str, dict],
-    current_level: int,
-    target_level: int,
     roadmap: list[dict],
 ) -> dict:
     """Assemble the full plan JSON structure from roadmap phases."""
@@ -215,15 +215,20 @@ def _build_plan_json(
         requires_edges: dict[str, list[str]] = {}
 
         for pattern_info in roadmap_phase["patterns"]:
-            # Find the pattern ID from MATURITY_MODEL
-            pattern_id = None
-            for level, patterns in MATURITY_MODEL.items():
-                for p in patterns:
-                    if p["name"] == pattern_info["name"]:
-                        pattern_id = p["id"]
+            pattern_id = normalize_pattern_id(pattern_info.get("pattern_id", ""))
+            if not pattern_id:
+                # Fall back to name lookup
+                pattern_name = pattern_info["name"]
+                for cat in RUBRIC.values():
+                    for lp in cat["levels"].values():
+                        for p in lp:
+                            if p["name"] == pattern_name:
+                                pattern_id = p["id"]
+                                break
+                        if pattern_id:
+                            break
+                    if pattern_id:
                         break
-                if pattern_id:
-                    break
 
             if not pattern_id:
                 continue
@@ -274,8 +279,9 @@ def _build_plan_json(
 
         phases.append({
             "phase": phase_num,
-            "target_level": roadmap_phase["target_level"],
-            "title": f"Phase {phase_num}: Level {roadmap_phase['target_level']}",
+            "category": roadmap_phase.get("category", ""),
+            "category_name": roadmap_phase.get("category_name", ""),
+            "title": f"Phase {phase_num}: {roadmap_phase.get('category_name', '')}",
             "steps": phase_steps,
             "checkpoint": f"Review Phase {phase_num} before continuing",
         })
@@ -284,8 +290,6 @@ def _build_plan_json(
 
     return {
         "consultation_id": consultation_id,
-        "current_level": current_level,
-        "target_level": target_level,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "phases": phases,
         "summary": summary,
@@ -298,7 +302,6 @@ def _render_markdown(plan_json: dict, project_description: str) -> str:
     lines.append("# Implementation Plan")
     lines.append("")
     lines.append(f"**Project:** {project_description}")
-    lines.append(f"**Current Level:** L{plan_json['current_level']} → **Target:** L{plan_json['target_level']}")
     lines.append(f"**Generated:** {plan_json['generated_at']}")
     lines.append("")
 
@@ -309,7 +312,6 @@ def _render_markdown(plan_json: dict, project_description: str) -> str:
 
     for phase in plan_json["phases"]:
         lines.append(f"## {phase['title']}")
-        lines.append(f"*Target: Level {phase['target_level']}*")
         lines.append("")
 
         for step in phase["steps"]:
@@ -394,27 +396,19 @@ async def generate_implementation_plan(
             "consultation_id": consultation_id,
         }
 
-    # Compute maturity and roadmap
-    maturity = _compute_maturity_level(assessments)
-    current_level = maturity["current_level"]
-    target_level = min(current_level + 1, 6)
-    roadmap_levels = 3
-    max_roadmap_level = min(current_level + roadmap_levels, 6)
-
-    gaps = _compute_gap_analysis(assessments, current_level, max_roadmap_level)
-    roadmap = _compute_roadmap(gaps, current_level, max_roadmap_level)
+    # Compute category ratings and roadmap
+    category_ratings = _compute_category_ratings(assessments)
+    gaps = _compute_gap_analysis(assessments, category_ratings)
+    roadmap = _compute_roadmap(gaps, category_ratings)
 
     if not roadmap:
         return {
             "consultation_id": consultation_id,
-            "message": "No gaps found — all patterns within roadmap scope are implemented or not applicable.",
-            "current_level": current_level,
+            "message": "No gaps found — all patterns are implemented or not applicable.",
         }
 
     # Build plan
-    plan_json = _build_plan_json(
-        consultation_id, assessments, current_level, target_level, roadmap,
-    )
+    plan_json = _build_plan_json(consultation_id, assessments, roadmap)
 
     # Render markdown
     project_description = record.get("project_description", "")
@@ -443,8 +437,6 @@ async def generate_implementation_plan(
     return {
         "consultation_id": consultation_id,
         "markdown_path": markdown_path,
-        "current_level": current_level,
-        "target_level": target_level,
         "summary": plan_json["summary"],
         "phases": len(plan_json["phases"]),
     }

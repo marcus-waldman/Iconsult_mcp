@@ -12,7 +12,8 @@ import os
 from datetime import datetime, timezone
 
 from iconsult_mcp.db import get_connection
-from iconsult_mcp.tools.score_architecture import score_architecture, normalize_pattern_id, _PATTERN_ID_ALIASES
+from iconsult_mcp.tools.score_architecture import score_architecture
+from iconsult_mcp.tools.rubric_data import normalize_pattern_id, _PATTERN_ID_ALIASES
 from iconsult_mcp.tools.failure_scenarios import generate_failure_scenarios
 from iconsult_mcp.tools.consultation_report import consultation_report
 
@@ -93,39 +94,38 @@ def _render_exec_brief(text: str) -> str:
     return f'  <strong>Executive Brief</strong><br>\n  {safe}'
 
 
-def _render_maturity_banner(current_level: int, target_level: int, level_details: dict) -> str:
+# Rating → CSS class
+_RATING_CSS: dict[str, str] = {
+    "not_started": "rating-not-started",
+    "emerging": "rating-emerging",
+    "established": "rating-established",
+    "mature": "rating-mature",
+}
+
+_RATING_LABEL: dict[str, str] = {
+    "not_started": "Not Started",
+    "emerging": "Emerging",
+    "established": "Established",
+    "mature": "Mature",
+}
+
+
+def _render_maturity_banner(categories: dict) -> str:
     lines = []
     lines.append('<div class="maturity-banner ani">')
-    lines.append('  <div class="maturity-level maturity-current">')
-    lines.append(f'    <div class="maturity-number" data-count="{current_level}">{current_level}</div>')
-    lines.append('    <div class="maturity-label">Current</div>')
-    lines.append('  </div>')
-    lines.append('  <div class="maturity-arrow">&rarr;</div>')
-    lines.append('  <div class="maturity-level maturity-target">')
-    lines.append(f'    <div class="maturity-number">{target_level}</div>')
-    lines.append('    <div class="maturity-label">Target</div>')
-    lines.append('  </div>')
-    lines.append('  <div class="maturity-desc">')
+    lines.append('  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;width:100%;">')
 
-    # Determine description text
-    met = level_details.get(str(current_level), level_details.get(current_level, {})).get("met", False)
-    status_text = "Fully Met" if met else "In Progress"
-    lines.append(f'    <h3>Level {current_level} &mdash; {_esc(status_text)}</h3>')
+    for cat_key, cat in categories.items():
+        rating = cat.get("rating", "not_started")
+        css = _RATING_CSS.get(rating, "rating-not-started")
+        label = _RATING_LABEL.get(rating, rating.title())
+        name = cat.get("name", cat_key)
 
-    # Level bar segments
-    lines.append('    <div class="level-bar">')
-    for lvl in range(1, 7):
-        if lvl <= current_level:
-            cls = "level-segment filled"
-            title = f"L{lvl}: Met"
-        elif lvl <= target_level:
-            cls = "level-segment target"
-            title = f"L{lvl}: Target"
-        else:
-            cls = "level-segment"
-            title = f"L{lvl}: Future"
-        lines.append(f'      <div class="{cls}" title="{title}"></div>')
-    lines.append('    </div>')
+        lines.append(f'    <div class="category-badge {css}" style="text-align:center;padding:12px;border-radius:8px;">')
+        lines.append(f'      <div style="font-weight:700;font-size:0.95rem;">{_esc(name)}</div>')
+        lines.append(f'      <div class="status-badge {css}" style="margin-top:6px;">{_esc(label)}</div>')
+        lines.append('    </div>')
+
     lines.append('  </div>')
     lines.append('</div>')
     return "\n".join(lines)
@@ -213,56 +213,73 @@ def _get_concept_definitions(pattern_ids: list[str]) -> dict[str, str]:
         return {}
 
 
-def _render_scorecard_rows(pattern_details: list[dict], recommendation_narratives: dict | None) -> str:
-    """Render <tr> rows for the scorecard table."""
+def _render_scorecard_rows(categories: dict, recommendation_narratives: dict | None) -> str:
+    """Render <tr> rows for the scorecard table, grouped by category."""
     rec_narr = recommendation_narratives or {}
 
-    # Fetch concept definitions as fallback tooltip descriptions
-    pattern_ids = [p.get("pattern_id", "") for p in pattern_details]
-    concept_defs = _get_concept_definitions(pattern_ids)
+    # Collect all pattern IDs for tooltip lookup
+    all_pids = []
+    for cat in categories.values():
+        for lv in cat.get("levels", {}).values():
+            for p in lv.get("patterns", []):
+                all_pids.append(p.get("pattern_id", ""))
+    concept_defs = _get_concept_definitions(all_pids)
 
     rows = []
-    current_level = None
 
-    for p in pattern_details:
-        level = p.get("maturity_level", 0)
-        status = p.get("status", "not_assessed")
-        goal = p.get("goal", status)
-        evidence = p.get("evidence", "")
-        name = p.get("pattern_name", p.get("pattern_id", ""))
-        chapter = p.get("chapter", "")
-        pid = p.get("pattern_id", "")
+    for cat_key, cat in categories.items():
+        rating = cat.get("rating", "not_started")
+        rating_css = _RATING_CSS.get(rating, "rating-not-started")
+        rating_label = _RATING_LABEL.get(rating, rating.title())
 
-        # Level separator comment
-        if level != current_level:
-            rows.append(f"<!-- L{level} -->")
-            current_level = level
+        # Category header row
+        rows.append(f'<tr class="category-header">')
+        rows.append(f'  <td colspan="4"><strong>{_esc(cat.get("name", cat_key))}</strong>')
+        rows.append(f'    <span class="status-badge {rating_css}" style="margin-left:8px;">{_esc(rating_label)}</span>')
+        rows.append(f'  </td>')
+        rows.append('</tr>')
 
-        # Build tooltip data attributes (displayed via JS with fixed positioning)
-        # Priority: recommendation narrative > evidence > concept definition
-        tooltip_text = rec_narr.get(pid) or evidence or concept_defs.get(pid, "")
-        tooltip_detail = _esc(tooltip_text)
-        book_ref = f"Ch. {chapter}" if chapter else ""
+        for level_name in ("basic", "intermediate", "advanced"):
+            level_data = cat.get("levels", {}).get(level_name, {})
+            patterns = level_data.get("patterns", [])
+            if not patterns:
+                continue
 
-        # Status badges
-        status_css = _STATUS_CSS.get(status, "status-na")
-        status_label = _STATUS_LABEL.get(status, status.title())
-        goal_css = _STATUS_CSS.get(goal, "status-na")
-        goal_label = _STATUS_LABEL.get(goal, goal.title())
+            for p in patterns:
+                pid = p.get("pattern_id", "")
+                name = p.get("pattern_name", pid)
+                status = p.get("status", "not_assessed")
+                met = p.get("met", False)
+                evidence = p.get("evidence", "")
 
-        rows.append("<tr>")
-        rows.append(
-            f'  <td class="has-tooltip" data-tt-title="{_esc(name)}"'
-            f' data-tt-desc="{tooltip_detail}"'
-            f' data-tt-ref="{_esc(book_ref)}"><strong>{_esc(name)}</strong>'
-        )
-        rows.append("  </td>")
-        rows.append(f'  <td class="level-cell">{level}</td>')
-        rows.append(f'  <td><span class="status-badge {status_css}">{status_label}</span></td>')
-        rows.append(f'  <td><span class="status-badge {goal_css}">{goal_label}</span></td>')
-        evidence_display = _esc(evidence) if evidence else "No evidence in codebase"
-        rows.append(f'  <td style="font-size:12px;color:var(--text-dim)">{evidence_display}</td>')
-        rows.append("</tr>")
+                # Tooltip
+                tooltip_text = rec_narr.get(pid) or evidence or concept_defs.get(pid, "")
+                tooltip_detail = _esc(tooltip_text)
+                book_ref = f"Ch. {cat.get('chapter', '')}"
+
+                # Status badge
+                status_css = _STATUS_CSS.get(status, "status-na")
+                status_label = _STATUS_LABEL.get(status, status.title())
+
+                # Indicator summary
+                ind_summary = p.get("indicator_summary")
+                ind_text = ""
+                if ind_summary:
+                    ind_text = f'{ind_summary["met"]}/{ind_summary["total"]}'
+
+                rows.append("<tr>")
+                rows.append(
+                    f'  <td class="has-tooltip" data-tt-title="{_esc(name)}"'
+                    f' data-tt-desc="{tooltip_detail}"'
+                    f' data-tt-ref="{_esc(book_ref)}">'
+                    f'<strong>{_esc(name)}</strong></td>'
+                )
+                rows.append(f'  <td class="level-cell">{_esc(level_name.title())}</td>')
+                rows.append(f'  <td><span class="status-badge {status_css}">{status_label}</span></td>')
+                evidence_display = _esc(evidence) if evidence else "&mdash;"
+                ind_html = f' <span style="font-size:11px;color:var(--text-dim);">({ind_text})</span>' if ind_text else ""
+                rows.append(f'  <td style="font-size:12px;color:var(--text-dim)">{evidence_display}{ind_html}</td>')
+                rows.append("</tr>")
 
     return "\n".join(rows)
 
@@ -309,27 +326,25 @@ def _render_tooltip_scripts(tooltips_current: dict, tooltips_target: dict) -> st
     return "\n".join(lines)
 
 
-def _render_recommendations(roadmap: list[dict], pattern_details: list[dict], recommendation_narratives: dict | None) -> str:
-    """Render phased recommendation cards."""
+def _render_recommendations(roadmap: list[dict], recommendation_narratives: dict | None) -> str:
+    """Render phased recommendation cards grouped by category."""
     rec_narr = recommendation_narratives or {}
-    # Build a lookup from pattern_id to detail
-    detail_by_id = {p["pattern_id"]: p for p in pattern_details}
 
     lines = []
     for phase in roadmap:
         phase_num = phase.get("phase", 1)
-        target_lvl = phase.get("target_level", phase_num)
+        cat_name = phase.get("category_name", "")
+        current_rating = phase.get("current_rating", "")
         phase_css = _PHASE_CSS.get(phase_num, "phase-3")
 
         lines.append(f'<div class="rec-phase {phase_css} ani">')
-        lines.append(f'  <div class="phase-header">Phase {phase_num}: Target L{target_lvl}</div>')
+        lines.append(f'  <div class="phase-header">Phase {phase_num}: {_esc(cat_name)}</div>')
         lines.append('  <div class="rec-cards">')
 
         for pattern in phase.get("patterns", []):
             pname = pattern.get("name", "")
             severity = pattern.get("severity", "")
-            pid_candidates = [p["pattern_id"] for p in pattern_details if p.get("pattern_name") == pname]
-            pid = pid_candidates[0] if pid_candidates else ""
+            level = pattern.get("level", "")
 
             # Priority badge
             badge = ""
@@ -338,22 +353,18 @@ def _render_recommendations(roadmap: list[dict], pattern_details: list[dict], re
             elif severity in ("WARNING", "HIGH"):
                 badge = ' <span class="priority-badge priority-high">High</span>'
 
-            # Description from Claude narratives or evidence
-            desc = rec_narr.get(pid, "")
-            if not desc:
-                detail = detail_by_id.get(pid, {})
-                desc = detail.get("evidence", "")
+            # Description from Claude narratives
+            desc = rec_narr.get(pname, "")
 
-            # Book reference
-            detail = detail_by_id.get(pid, {})
-            chapter = detail.get("chapter", "")
-            book_ref = f'Ch. {chapter}' if chapter else ""
+            # Missing indicators
+            missing_inds = pattern.get("missing_indicators", [])
+            if missing_inds and not desc:
+                desc = "Missing: " + "; ".join(missing_inds[:3])
 
             lines.append('    <div class="rec-card">')
             lines.append(f'      <h4>{_esc(pname)}{badge}</h4>')
+            lines.append(f'      <p style="font-size:12px;color:var(--text-dim);">{_esc(level.title())}</p>')
             lines.append(f'      <p>{_esc(desc)}</p>')
-            if book_ref:
-                lines.append(f'      <div class="book-ref">{_esc(book_ref)}</div>')
             lines.append('    </div>')
 
         lines.append('  </div>')
@@ -522,11 +533,7 @@ async def render_report(
     # -----------------------------------------------------------------------
     # 2. Extract structured values
     # -----------------------------------------------------------------------
-    maturity = score_data.get("maturity", {})
-    current_level = maturity.get("current_level", 0)
-    target_level = maturity.get("target_level", 1)
-    level_details = maturity.get("level_details", {})
-    pattern_details = score_data.get("pattern_coverage", {}).get("details", [])
+    categories = score_data.get("categories", {})
     roadmap = score_data.get("roadmap", [])
     scenarios = scenario_data.get("scenarios", [])
     failure_chain = scenario_data.get("failure_chain", {})
@@ -549,11 +556,11 @@ async def render_report(
         "title": _esc(title),
         "hero": _render_hero(title, date),
         "exec_brief": _render_exec_brief(executive_brief),
-        "maturity_banner": _render_maturity_banner(current_level, target_level, level_details),
+        "maturity_banner": _render_maturity_banner(categories),
         "system_section": _render_system_section(system_description, agents),
-        "scorecard_rows": _render_scorecard_rows(pattern_details, recommendation_narratives),
+        "scorecard_rows": _render_scorecard_rows(categories, recommendation_narratives),
         "diagrams": _render_diagrams(diagram_current, diagram_target, tooltips_current, tooltips_target),
-        "recommendations": _render_recommendations(roadmap, pattern_details, recommendation_narratives),
+        "recommendations": _render_recommendations(roadmap, recommendation_narratives),
         "failure_chain": _render_failure_chain(failure_chain),
         "stress_test": _render_stress_test(scenarios),
         "footer": _render_footer(consultation_id, date),
@@ -586,7 +593,6 @@ async def render_report(
     return {
         "path": filepath,
         "sections": rendered_sections,
-        "maturity": {"current": current_level, "target": target_level},
-        "patterns_rendered": len(pattern_details),
+        "categories_rendered": len(categories),
         "scenarios_rendered": len(scenarios),
     }
