@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from iconsult_mcp.db import get_connection
 from iconsult_mcp.tools.score_architecture import score_architecture
-from iconsult_mcp.tools.rubric_data import normalize_pattern_id, _PATTERN_ID_ALIASES
+from iconsult_mcp.tools.rubric_data import normalize_pattern_id, _PATTERN_ID_ALIASES, _PATTERN_ID_ALIASES_REVERSE, RUBRIC
 from iconsult_mcp.tools.failure_scenarios import generate_failure_scenarios
 from iconsult_mcp.tools.consultation_report import consultation_report
 
@@ -197,13 +197,17 @@ def _get_concept_definitions(pattern_ids: list[str]) -> dict[str, str]:
     """Fetch concept definitions from DB for use as tooltip fallback descriptions."""
     if not pattern_ids:
         return {}
-    # Build lookup IDs: try both the canonical ID and the KG alias
+    # Build lookup IDs: try both the canonical ID and all known aliases
+    # _PATTERN_ID_ALIASES maps kg_id → rubric_id; _REVERSE maps rubric_id → kg_id
     all_ids = set()
     for pid in pattern_ids:
         all_ids.add(pid)
-        # Also try the KG alias (shorter ID) if one exists
         if pid in _PATTERN_ID_ALIASES:
             all_ids.add(_PATTERN_ID_ALIASES[pid])
+        if pid in _PATTERN_ID_ALIASES_REVERSE:
+            all_ids.add(_PATTERN_ID_ALIASES_REVERSE[pid])
+        # Also check for common suffixes (_pattern)
+        all_ids.add(pid + "_pattern")
     try:
         conn = get_connection()
         placeholders = ", ".join(["?"] * len(all_ids))
@@ -220,6 +224,20 @@ def _get_concept_definitions(pattern_ids: list[str]) -> dict[str, str]:
         return result
     except Exception:
         return {}
+
+
+def _get_rubric_description(pattern_id: str) -> str:
+    """Build a fallback description from the rubric's indicator list."""
+    for cat in RUBRIC.values():
+        for lv in ("basic", "intermediate", "advanced"):
+            for p in cat["levels"].get(lv, []):
+                if p["id"] == pattern_id:
+                    indicators = p.get("indicators", [])
+                    if indicators:
+                        return "Key capabilities: " + "; ".join(
+                            ind.rstrip(".") for ind in indicators[:3]
+                        ) + "."
+    return ""
 
 
 def _render_scorecard_rows(categories: dict, recommendation_narratives: dict | None) -> str:
@@ -342,6 +360,7 @@ def _render_diagrams(
         lines.append('      <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>')
         lines.append('      <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>')
         lines.append('      <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>')
+        lines.append('      <button onclick="openDiagramWindow(this)" title="Open in new window">&#x29C9;</button>')
         lines.append('    </div>')
         lines.append(f'    <span class="mermaid-title">{_esc(label)}</span>')
         # Mermaid syntax is NOT html-escaped
@@ -409,9 +428,14 @@ def _render_recommendations(
             elif severity in ("WARNING", "HIGH"):
                 badge = ' <span class="priority-badge priority-high">High</span>'
 
-            # What is this pattern? (concept definition)
+            # What is this pattern? (narrative > concept def > rubric indicators)
             pattern_id = pattern.get("pattern_id", "")
-            what_text = rec_narr.get(pattern_id) or rec_narr.get(pname) or cdefs.get(pattern_id, "")
+            what_text = (
+                rec_narr.get(pattern_id)
+                or rec_narr.get(pname)
+                or cdefs.get(pattern_id, "")
+                or _get_rubric_description(pattern_id)
+            )
 
             # Why is it needed? (missing indicators)
             why_items = []

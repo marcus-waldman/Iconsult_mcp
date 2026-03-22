@@ -321,6 +321,7 @@ h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; }
   transition: background 0.15s, color 0.15s;
 }
 .zoom-controls button:hover { background: var(--border); color: var(--text); }
+.zoom-controls button:last-child { margin-left: 2px; border-left: 1px solid var(--border); border-radius: 0 4px 4px 0; }
 .mermaid-wrap .mermaid,
 .mermaid-wrap > svg {
   transform-origin: top left;
@@ -619,6 +620,74 @@ footer a { color: var(--accent); text-decoration: none; }
     var wrap = btn.closest('.mermaid-wrap');
     wrap.dataset.zoom = INITIAL_ZOOM;
     wrap.style.setProperty('--diagram-zoom', INITIAL_ZOOM);
+  }
+
+  function openDiagramWindow(btn) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var svg = wrap.querySelector('svg');
+    if (!svg) return;
+
+    var title = wrap.querySelector('.mermaid-title');
+    var titleText = title ? title.textContent : 'Architecture Diagram';
+
+    // Clone SVG and reset transform so it renders at native size
+    var svgClone = svg.cloneNode(true);
+    svgClone.style.transform = 'none';
+    svgClone.style.maxWidth = 'none';
+
+    var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var bg = isDark ? '#0c0a09' : '#faf9f7';
+    var text = isDark ? '#fafaf9' : '#1c1917';
+    var textMuted = isDark ? '#78716c' : '#a8a29e';
+    var border = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.07)';
+    var surface = isDark ? '#1c1917' : '#ffffff';
+
+    var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+      '<title>' + titleText + '</title>' +
+      '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700&family=Fragment+Mono:wght@400;700&display=swap" rel="stylesheet">' +
+      '<style>' +
+      'body { margin: 0; background: ' + bg + '; color: ' + text + '; font-family: "Bricolage Grotesque", system-ui, sans-serif; overflow: hidden; }' +
+      '.toolbar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; display: flex; align-items: center; gap: 12px; padding: 10px 20px; background: ' + surface + '; border-bottom: 1px solid ' + border + '; }' +
+      '.toolbar h1 { font-size: 15px; font-weight: 700; flex: 1; }' +
+      '.toolbar .zoom-label { font-family: "Fragment Mono", monospace; font-size: 12px; color: ' + textMuted + '; min-width: 48px; text-align: center; }' +
+      '.toolbar button { width: 32px; height: 32px; border: 1px solid ' + border + '; background: transparent; color: ' + text + '; font-size: 16px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; }' +
+      '.toolbar button:hover { background: ' + border + '; }' +
+      '.viewport { position: absolute; top: 53px; left: 0; right: 0; bottom: 0; overflow: auto; cursor: grab; }' +
+      '.viewport.panning { cursor: grabbing; user-select: none; }' +
+      '.svg-container { transform-origin: 0 0; padding: 32px; display: inline-block; min-width: 100%; min-height: 100%; }' +
+      '</style></head><body>' +
+      '<div class="toolbar">' +
+      '  <h1>' + titleText + '</h1>' +
+      '  <button onclick="zoom(0.8)" title="Zoom out">&minus;</button>' +
+      '  <span class="zoom-label" id="zoom-label">100%</span>' +
+      '  <button onclick="zoom(1.25)" title="Zoom in">+</button>' +
+      '  <button onclick="fit()" title="Fit to window">&#8634;</button>' +
+      '</div>' +
+      '<div class="viewport" id="vp">' +
+      '  <div class="svg-container" id="sc">' + svgClone.outerHTML + '</div>' +
+      '</div>' +
+      '<script>' +
+      'var scale = 1, sc = document.getElementById("sc"), vp = document.getElementById("vp"), lbl = document.getElementById("zoom-label");' +
+      'function apply() { sc.style.transform = "scale(" + scale + ")"; lbl.textContent = Math.round(scale * 100) + "%"; }' +
+      'function zoom(f) { scale = Math.min(Math.max(scale * f, 0.1), 10); apply(); }' +
+      'function fit() {' +
+      '  var svg = sc.querySelector("svg"); if (!svg) return;' +
+      '  var sw = svg.getBBox ? svg.getBBox().width : svg.scrollWidth;' +
+      '  var sh = svg.getBBox ? svg.getBBox().height : svg.scrollHeight;' +
+      '  scale = Math.min((vp.clientWidth - 64) / sw, (vp.clientHeight - 64) / sh, 2);' +
+      '  apply();' +
+      '}' +
+      'vp.addEventListener("wheel", function(e) { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); zoom(e.deltaY < 0 ? 1.1 : 0.9); }, {passive:false});' +
+      'var sx, sy, sl, st, panning = false;' +
+      'vp.addEventListener("mousedown", function(e) { panning = true; vp.classList.add("panning"); sx = e.clientX; sy = e.clientY; sl = vp.scrollLeft; st = vp.scrollTop; });' +
+      'window.addEventListener("mousemove", function(e) { if (!panning) return; vp.scrollLeft = sl - (e.clientX - sx); vp.scrollTop = st - (e.clientY - sy); });' +
+      'window.addEventListener("mouseup", function() { panning = false; vp.classList.remove("panning"); });' +
+      'fit();' +
+      '</scr' + 'ipt></body></html>';
+
+    var w = window.open('', '_blank', 'width=1200,height=800');
+    if (w) { w.document.write(html); w.document.close(); }
   }
 
   document.querySelectorAll('.mermaid-wrap').forEach(function(wrap) {

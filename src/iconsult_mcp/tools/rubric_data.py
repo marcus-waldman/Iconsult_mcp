@@ -511,6 +511,8 @@ _PATTERN_ID_ALIASES: dict[str, str] = {
     "human_calls_agent_pattern": "human_calls_agent",
     "agent_delegates_to_agent_pattern": "agent_delegates_to_agent",
     "agent_calls_proxy_agent_pattern": "agent_calls_proxy_agent",
+    # KG concept IDs -> rubric IDs (concept table uses _pattern suffix)
+    "causal_dependency_graph_pattern": "causal_dependency_graph",
 }
 
 # Build reverse map (rubric ID -> old ID, for first occurrence)
