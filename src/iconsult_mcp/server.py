@@ -238,6 +238,13 @@ Optionally call `supervise_consultation` after each major step to track progress
 get the suggested next action. \
 Then narrate: the complexity verdict and what the plan focuses on.
 
+   **Create task list:** Immediately after the plan is generated, use the TaskCreate \
+tool to populate the task list so the user can track progress. Create one task per \
+plan step, using each step's `description` as the task description. Mark the earlier \
+steps (Read Project, Match Concepts, Plan) as already completed since they are done \
+by this point. As you complete each subsequent step, mark its task completed before \
+moving on.
+
 3. **TRAVERSE GRAPH (scatter-gather)** — For each matched seed concept, spawn a \
 parallel subagent (via the Agent tool) to explore its neighbourhood independently. \
 Each subagent should use this prompt template:
@@ -1227,7 +1234,11 @@ what you searched for and which top concepts came back — any surprises?
 2b. **Plan** — Call `plan_consultation` with the `consultation_id`. This assesses \
 complexity and generates an adaptive plan. Follow the plan for remaining steps. \
 Optionally call `supervise_consultation` after each major step for progress tracking. \
-Then tell me: the complexity verdict and what the plan focuses on.
+Then tell me: the complexity verdict and what the plan focuses on. \
+**Immediately after the plan is generated**, use the TaskCreate tool to populate the \
+task list so I can track your progress. Create one task per plan step using each step's \
+`description`. Mark earlier steps (Read Project, Match Concepts, Plan) as already \
+completed. Mark each subsequent task completed as you finish it.
 
 3. **Traverse the graph (scatter-gather)** — For each matched seed concept, spawn a \
 parallel subagent (via the Agent tool) to explore its neighbourhood. Each subagent calls \
