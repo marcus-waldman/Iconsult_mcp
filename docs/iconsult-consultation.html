@@ -1,0 +1,1664 @@
+<!DOCTYPE html>
+<!--
+  iConsult Consultation Report — Slot-Based Template
+  ===================================================
+  Server-side template used by render_report tool.
+  Slots (SLOT:section_name markers) are replaced with generated HTML.
+  CSS, JS, zoom controls, tooltip system, and animations are preserved verbatim.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Iconsult MCP Self-Consultation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700;800&family=Fragment+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
+<style>
+:root {
+  --font-body: 'Bricolage Grotesque', system-ui, sans-serif;
+  --font-mono: 'Fragment Mono', 'SF Mono', Consolas, monospace;
+  --bg: #faf9f7;
+  --surface: #ffffff;
+  --surface-elevated: #ffffff;
+  --border: rgba(0,0,0,0.07);
+  --border-bright: rgba(0,0,0,0.14);
+  --text: #1c1917;
+  --text-dim: #78716c;
+  --text-muted: #a8a29e;
+  --accent: #0d9488;
+  --accent-dim: rgba(13,148,136,0.08);
+  --accent-bright: #14b8a6;
+  --green: #059669;
+  --green-dim: rgba(5,150,105,0.1);
+  --amber: #d97706;
+  --amber-dim: rgba(217,119,6,0.08);
+  --red: #dc2626;
+  --red-dim: rgba(220,38,38,0.08);
+  --blue: #2563eb;
+  --blue-dim: rgba(37,99,235,0.08);
+  --purple: #7c3aed;
+  --purple-dim: rgba(124,58,237,0.08);
+  --implemented: #059669;
+  --implemented-bg: rgba(5,150,105,0.08);
+  --partial: #d97706;
+  --partial-bg: rgba(217,119,6,0.08);
+  --missing: #dc2626;
+  --missing-bg: rgba(220,38,38,0.06);
+  --na: #78716c;
+  --na-bg: rgba(120,113,108,0.06);
+  --level-current: #0d9488;
+  --level-target: #2563eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0a09;
+    --surface: #1c1917;
+    --surface-elevated: #292524;
+    --border: rgba(255,255,255,0.06);
+    --border-bright: rgba(255,255,255,0.12);
+    --text: #fafaf9;
+    --text-dim: #a8a29e;
+    --text-muted: #78716c;
+    --accent: #2dd4bf;
+    --accent-dim: rgba(45,212,191,0.1);
+    --accent-bright: #5eead4;
+    --green: #34d399;
+    --green-dim: rgba(52,211,153,0.12);
+    --amber: #fbbf24;
+    --amber-dim: rgba(251,191,36,0.1);
+    --red: #f87171;
+    --red-dim: rgba(248,113,113,0.1);
+    --blue: #60a5fa;
+    --blue-dim: rgba(96,165,250,0.1);
+    --purple: #a78bfa;
+    --purple-dim: rgba(167,139,250,0.1);
+    --implemented: #34d399;
+    --implemented-bg: rgba(52,211,153,0.1);
+    --partial: #fbbf24;
+    --partial-bg: rgba(251,191,36,0.1);
+    --missing: #f87171;
+    --missing-bg: rgba(248,113,113,0.08);
+    --na: #78716c;
+    --na-bg: rgba(120,113,108,0.08);
+    --level-current: #2dd4bf;
+    --level-target: #60a5fa;
+  }
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  background-image:
+    radial-gradient(at 15% 10%, var(--accent-dim) 0%, transparent 50%),
+    radial-gradient(at 85% 50%, var(--green-dim) 0%, transparent 40%);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* NAV */
+.nav {
+  position: sticky; top: 0; z-index: 100;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+}
+.nav-inner {
+  max-width: 1200px; margin: 0 auto;
+  display: flex; align-items: center; gap: 8px;
+  height: 52px; overflow-x: auto;
+}
+.nav a {
+  color: var(--text-dim); text-decoration: none;
+  font-size: 13px; font-weight: 500;
+  padding: 6px 12px; border-radius: 6px;
+  white-space: nowrap; transition: all 0.15s;
+}
+.nav a:hover { color: var(--text); background: var(--accent-dim); }
+
+/* LAYOUT */
+.container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+section { padding: 48px 0; }
+h1 { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 16px; }
+h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; }
+.subtitle { color: var(--text-dim); font-size: 1.05rem; margin-top: 8px; }
+
+/* HERO */
+.hero { padding: 64px 0 32px; }
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--accent); background: var(--accent-dim);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  padding: 4px 12px; border-radius: 100px;
+  margin-bottom: 16px;
+}
+.hero-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+/* EXECUTIVE BRIEF */
+.exec-brief {
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  border-left: 4px solid var(--accent);
+  border-radius: 12px; padding: 28px 32px;
+  margin: 24px 0; line-height: 1.75;
+}
+.exec-brief strong { color: var(--accent); }
+
+/* MATURITY BANNER */
+.maturity-banner {
+  display: flex; align-items: center; gap: 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px; padding: 28px 36px;
+  margin: 24px 0;
+}
+.maturity-level {
+  display: flex; flex-direction: column; align-items: center;
+  min-width: 90px;
+}
+.maturity-number {
+  font-size: 3rem; font-weight: 800; line-height: 1;
+}
+.maturity-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+  margin-top: 4px;
+}
+.maturity-current .maturity-number { color: var(--level-current); }
+.maturity-current .maturity-label { color: var(--level-current); }
+.maturity-target .maturity-number { color: var(--level-target); }
+.maturity-target .maturity-label { color: var(--level-target); }
+.maturity-arrow {
+  font-size: 2rem; color: var(--text-muted);
+}
+.maturity-desc { flex: 1; }
+.maturity-desc h3 { margin-bottom: 4px; }
+.maturity-desc p { color: var(--text-dim); font-size: 0.95rem; }
+.level-bar {
+  display: flex; gap: 4px; margin-top: 12px;
+}
+.level-segment {
+  height: 8px; flex: 1; border-radius: 4px; background: var(--border);
+}
+.level-segment.filled { background: var(--level-current); }
+.level-segment.target { background: var(--level-target); opacity: 0.4; }
+
+/* AGENT ROSTER */
+.roster-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px; margin-top: 16px;
+}
+.roster-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.roster-card:hover {
+  border-color: var(--border-bright);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+}
+.roster-card h4 {
+  font-size: 0.95rem; font-weight: 700;
+  display: flex; align-items: center; gap: 8px;
+}
+.roster-icon {
+  width: 28px; height: 28px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; flex-shrink: 0;
+}
+.roster-card p { font-size: 0.85rem; color: var(--text-dim); margin-top: 6px; }
+.roster-tools {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px;
+}
+.tool-tag {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 2px 8px; border-radius: 4px;
+  background: var(--accent-dim); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+/* SCORECARD TABLE */
+.scorecard-wrap {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; overflow: hidden; margin-top: 16px;
+}
+.scorecard-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.scorecard-table th {
+  background: var(--surface-elevated);
+  border-bottom: 2px solid var(--border-bright);
+  padding: 12px 16px; text-align: left;
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.scorecard-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.scorecard-table tr:last-child td { border-bottom: none; }
+.scorecard-table tr:hover td { background: var(--accent-dim); }
+.level-cell {
+  font-family: var(--font-mono); font-size: 12px;
+  font-weight: 700; text-align: center;
+  width: 40px;
+}
+.status-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 100px;
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+}
+.status-implemented { background: var(--implemented-bg); color: var(--implemented); }
+.status-partial { background: var(--partial-bg); color: var(--partial); }
+.status-missing { background: var(--missing-bg); color: var(--missing); }
+.status-na { background: var(--na-bg); color: var(--na); }
+
+/* CATEGORY RATING BADGES */
+.rating-mature { background: var(--implemented-bg); color: var(--implemented); }
+.rating-established { background: var(--blue-dim); color: var(--blue); }
+.rating-emerging { background: var(--amber-dim); color: var(--amber); }
+.rating-not-started { background: var(--na-bg); color: var(--na); }
+
+/* CATEGORY SCORECARD TABLES */
+.cat-scorecard { margin-top: 20px; }
+.cat-scorecard-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+  border-bottom: 2px solid var(--border-bright);
+}
+.cat-scorecard-header h3 { margin: 0; font-size: 1rem; }
+.cat-scorecard-body {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+}
+
+/* TOOLTIP */
+.has-tooltip { cursor: help; }
+
+/* MERMAID */
+.mermaid-wrap {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 32px; overflow: auto;
+  margin: 16px 0; position: relative;
+}
+.mermaid-title {
+  position: absolute; top: 12px; left: 20px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-muted);
+}
+.diagram-row {
+  display: grid; grid-template-columns: 1fr; gap: 24px;
+}
+
+/* ZOOM CONTROLS */
+.zoom-controls {
+  position: absolute; top: 8px; right: 8px;
+  display: flex; gap: 2px; z-index: 10;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 2px;
+}
+.zoom-controls button {
+  width: 28px; height: 28px; border: none; background: transparent;
+  color: var(--text-dim); font-family: var(--font-mono); font-size: 14px;
+  cursor: pointer; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.zoom-controls button:hover { background: var(--border); color: var(--text); }
+.zoom-controls button:last-child { margin-left: 2px; border-left: 1px solid var(--border); border-radius: 0 4px 4px 0; }
+.mermaid-wrap .mermaid,
+.mermaid-wrap > svg {
+  transform-origin: top left;
+  transform: scale(var(--diagram-zoom, 1.2));
+}
+.mermaid-wrap { cursor: grab; min-height: 400px; }
+.mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+
+/* SVG NODE TOOLTIPS */
+.svg-tooltip {
+  position: fixed; z-index: 1000; max-width: 320px;
+  padding: 14px 18px; background: var(--surface-elevated);
+  border: 1px solid var(--border-bright); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  font-size: 13px; line-height: 1.6; color: var(--text);
+  pointer-events: none; opacity: 0; transition: opacity 0.15s ease;
+}
+.svg-tooltip.visible { opacity: 1; }
+.svg-tooltip strong { color: var(--accent); display: block; margin-bottom: 6px; font-size: 14px; }
+.svg-tooltip .tt-ref { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; margin-top: 8px; display: block; }
+.mermaid svg g.node:hover rect,
+.mermaid svg g.node:hover circle,
+.mermaid svg g.node:hover polygon {
+  filter: brightness(1.1); stroke-width: 2.5px !important; cursor: pointer;
+}
+
+/* RECOMMENDATION CARDS */
+.rec-phase {
+  margin-top: 24px;
+}
+.phase-header {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 700;
+  padding: 4px 14px; border-radius: 6px; margin-bottom: 12px;
+}
+.phase-1 .phase-header { background: var(--green-dim); color: var(--green); }
+.phase-2 .phase-header { background: var(--amber-dim); color: var(--amber); }
+.phase-3 .phase-header { background: var(--blue-dim); color: var(--blue); }
+.rec-cards { display: flex; flex-direction: column; gap: 12px; }
+.rec-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px 24px;
+  transition: border-color 0.2s;
+}
+.rec-card:hover { border-color: var(--border-bright); }
+.rec-card h4 { font-size: 0.95rem; font-weight: 700; margin-bottom: 6px; }
+.rec-card p { font-size: 0.88rem; color: var(--text-dim); }
+.rec-card code {
+  font-family: var(--font-mono); font-size: 12px;
+  background: var(--accent-dim); padding: 2px 6px; border-radius: 4px;
+}
+.priority-badge {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 2px 8px; border-radius: 4px; margin-left: 8px;
+}
+.priority-high { background: var(--amber-dim); color: var(--amber); }
+.priority-critical { background: var(--red-dim); color: var(--red); }
+.book-ref {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-muted); margin-top: 8px;
+}
+
+/* FAILURE CHAIN */
+.chain-steps {
+  display: flex; gap: 0; margin: 24px 0; flex-wrap: wrap;
+  align-items: stretch;
+}
+.chain-step {
+  flex: 1; min-width: 140px;
+  padding: 16px; text-align: center;
+  border: 2px solid var(--border);
+  border-radius: 12px; position: relative;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 6px;
+}
+.chain-step.implemented { border-color: var(--implemented); background: var(--implemented-bg); }
+.chain-step.missing { border-color: var(--missing); background: var(--missing-bg); border-style: dashed; }
+.chain-arrow {
+  display: flex; align-items: center; color: var(--text-muted);
+  font-size: 1.5rem; padding: 0 4px;
+}
+.chain-step .step-num {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  color: var(--text-muted);
+}
+.chain-step .step-name { font-size: 0.82rem; font-weight: 600; }
+.chain-step .step-status {
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.chain-step.implemented .step-status { color: var(--implemented); }
+.chain-step.missing .step-status { color: var(--missing); }
+.chain-coverage {
+  font-family: var(--font-mono); font-size: 2rem; font-weight: 800;
+  color: var(--accent);
+}
+
+/* STRESS TEST */
+details.scenario {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; margin: 12px 0;
+}
+details.scenario summary {
+  padding: 16px 20px; cursor: pointer;
+  font-weight: 600; font-size: 0.95rem;
+  display: flex; align-items: center; gap: 10px;
+  list-style: none;
+}
+details.scenario summary::before {
+  content: '\25B6'; font-size: 10px; color: var(--text-muted);
+  transition: transform 0.2s;
+}
+details.scenario[open] summary::before { transform: rotate(90deg); }
+details.scenario summary::-webkit-details-marker { display: none; }
+.scenario-body { padding: 0 20px 20px; }
+.cascade-step {
+  display: flex; gap: 12px; padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+.cascade-step:last-child { border-bottom: none; }
+.cascade-num {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  color: var(--text-muted); min-width: 24px;
+}
+.cascade-ref { font-family: var(--font-mono); font-size: 11px; color: var(--amber); }
+.severity-tag {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 4px; letter-spacing: 0.06em;
+}
+.severity-info { background: var(--blue-dim); color: var(--blue); }
+.severity-warning { background: var(--amber-dim); color: var(--amber); }
+.severity-critical { background: var(--red-dim); color: var(--red); }
+
+/* FOOTER */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 24px 0; margin-top: 48px; text-align: center;
+  font-size: 0.82rem; color: var(--text-muted);
+}
+footer a { color: var(--accent); text-decoration: none; }
+
+/* ANIMATION */
+.ani { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .ani { opacity: 1 !important; } }
+
+/* MERMAID OVERRIDES */
+.mermaid .nodeLabel { color: var(--text) !important; }
+.mermaid .edgeLabel { color: var(--text-dim) !important; background-color: var(--surface) !important; }
+.mermaid .edgeLabel rect { fill: var(--surface) !important; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#brief">Brief</a>
+    <a href="#system">System</a>
+    <a href="#maturity">Maturity</a>
+    <a href="#scorecard">Scorecard</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#recommendations">Recommendations</a>
+    <a href="#failure-chain">Recovery Chain</a>
+    <a href="#stress-test">Stress Test</a>
+  </div>
+</nav>
+
+<div class="container">
+
+<!-- HERO -->
+<section class="hero" id="brief">
+  <div class="hero-badge ani">iConsult Architecture Review</div>
+  <h1 class="ani">Iconsult MCP Self-Consultation</h1>
+  <p class="subtitle ani">Based on <em>Agentic Architectural Patterns for Building Multi-Agent Systems</em> (Arsanjani &amp; Bustos, Packt 2026). Consultation date: 2026-03-23.</p>
+</section>
+
+<!-- EXECUTIVE BRIEF -->
+<div class="exec-brief ani" id="exec-brief">
+  <strong>Executive Brief</strong><br>
+  Iconsult MCP is a mature multi-agent architecture consultation platform that practices what it preaches — implementing 19 of 36 rubric patterns with 3 categories at Mature rating (Coordination, Human-Agent Interaction, Continuous Improvement). The strongest opportunity for growth is in the Infrastructure category (currently Emerging), where formalizing auth enforcement and evolving the static tool registry into a dynamic discovery system would unlock the most maturity improvement. Robustness can reach Mature by adding fallback model invocation and global rate limiting across concurrent subagents — both extend existing retry and batching logic with modest effort.
+</div>
+
+<!-- SYSTEM UNDER REVIEW -->
+<section id="system">
+<h2 class="ani">System Under Review</h2>
+<p class="subtitle">Multi-Agent Architecture Consultation MCP Server</p>
+<div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+  <div class="rec-card ani">
+    <h4>Architecture</h4>
+    <p>Python MCP server with stdio transport, 25 tools dispatched via centralized TOOL_DISPATCH dict with per-tool metadata (timeout, retry, access level). 7-step guided consultation workflow with scatter-gather subagent orchestration, blackboard knowledge hub, and supervisor progress tracking.</p>
+  </div>
+  <div class="rec-card ani">
+    <h4>Tech Stack</h4>
+    <p>Python 3.10+, asyncio, DuckDB on MotherDuck (12 tables), OpenAI text-embedding-3-small (1536 dims) via raw urllib, Anthropic Claude API, hatchling build system, pytest (134 tests)</p>
+  </div>
+  <div class="rec-card ani">
+    <h4>Coordination</h4>
+    <p>Dual coordination model: shared epistemic memory (upsert key-value) + blackboard knowledge hub (append-only typed facts with conflict detection). Event-driven reactivity with 6 event types. Adaptive planning with complexity assessment (simple/moderate/complex). Write-behind step buffering (85% DB round-trip reduction).</p>
+  </div>
+  <div class="rec-card ani">
+    <h4>Security</h4>
+    <p>Declarative access levels (read/write/admin) per tool via access_policy.py. Consultation ownership validation. Stdio transport provides inherent process isolation. No bearer token auth (appropriate for local subprocess model).</p>
+  </div>
+</div>
+<h3 style="margin-top: 32px;" class="ani">Agent Roster</h3>
+<div class="roster-grid">
+  <div class="roster-card ani">
+    <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">🧠</span> Consultant (Claude)</h4>
+    <p>Primary orchestrator — executes 7-step workflow, spawns subagents, synthesizes findings</p>
+    <div class="roster-tools">
+      <span class="tool-tag">match_concepts</span>
+      <span class="tool-tag">plan_consultation</span>
+      <span class="tool-tag">supervise_consultation</span>
+      <span class="tool-tag">ask_book</span>
+      <span class="tool-tag">render_report</span>
+    </div>
+  </div>
+  <div class="roster-card ani">
+    <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">🔍</span> Graph Explorer (Subagent)</h4>
+    <p>Scatter-gather subagent — traverses knowledge graph neighborhoods per seed concept</p>
+    <div class="roster-tools">
+      <span class="tool-tag">get_subgraph</span>
+      <span class="tool-tag">assert_fact</span>
+      <span class="tool-tag">emit_event</span>
+    </div>
+  </div>
+  <div class="roster-card ani">
+    <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">📊</span> Pattern Assessor</h4>
+    <p>Evaluates codebase patterns against rubric, logs assessments with evidence</p>
+    <div class="roster-tools">
+      <span class="tool-tag">log_pattern_assessment</span>
+      <span class="tool-tag">score_architecture</span>
+      <span class="tool-tag">generate_failure_scenarios</span>
+    </div>
+  </div>
+  <div class="roster-card ani">
+    <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">🔎</span> Quality Auditor</h4>
+    <p>Deterministic quality critique — validates workflow completeness and coverage</p>
+    <div class="roster-tools">
+      <span class="tool-tag">critique_consultation</span>
+      <span class="tool-tag">validate_subagent</span>
+      <span class="tool-tag">consultation_report</span>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- MATURITY BANNER -->
+<section id="maturity">
+<h2 class="ani">Maturity Assessment</h2>
+<div class="maturity-banner ani">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;width:100%;">
+    <div class="rating-mature" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
+      <div style="font-size:1.5rem;line-height:1;">&#x2605;</div>
+      <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">Coordination &amp; Planning</div>
+      <div class="status-badge rating-mature" style="margin-top:6px;">Mature</div>
+    </div>
+    <div class="rating-established" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
+      <div style="font-size:1.5rem;line-height:1;">&#x2713;</div>
+      <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">Explainability &amp; Compliance</div>
+      <div class="status-badge rating-established" style="margin-top:6px;">Established</div>
+    </div>
+    <div class="rating-established" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
+      <div style="font-size:1.5rem;line-height:1;">&#x2713;</div>
+      <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">Robustness &amp; Fault Tolerance</div>
+      <div class="status-badge rating-established" style="margin-top:6px;">Established</div>
+    </div>
+    <div class="rating-mature" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
+      <div style="font-size:1.5rem;line-height:1;">&#x2605;</div>
+      <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">Human-Agent Interaction</div>
+      <div class="status-badge rating-mature" style="margin-top:6px;">Mature</div>
+    </div>
+    <div class="rating-established" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
+      <div style="font-size:1.5rem;line-height:1;">&#x2713;</div>
+      <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">Agent-Level Capabilities</div>
+      <div class="status-badge rating-established" style="margin-top:6px;">Established</div>
+    </div>
+    <div class="rating-emerging" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
+      <div style="font-size:1.5rem;line-height:1;">&#x25B2;</div>
+      <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">System-Level Infrastructure</div>
+      <div class="status-badge rating-emerging" style="margin-top:6px;">Emerging</div>
+    </div>
+    <div class="rating-mature" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
+      <div style="font-size:1.5rem;line-height:1;">&#x2605;</div>
+      <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">Continuous Improvement</div>
+      <div class="status-badge rating-mature" style="margin-top:6px;">Mature</div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- MATURITY SCORECARD -->
+<section id="scorecard">
+<h2 class="ani">Maturity Scorecard</h2>
+<p class="subtitle">Each pattern assessed against the Ch. 12 rubric. Hover status badges for evidence.</p>
+<div class="cat-scorecard ani">
+  <div class="cat-scorecard-header">
+    <h3>Coordination &amp; Planning</h3>
+    <span class="status-badge rating-mature">&#x2605; Mature</span>
+  </div>
+  <div class="cat-scorecard-body">
+  <table class="scorecard-table">
+  <thead><tr>
+    <th>Pattern</th>
+    <th style="text-align:center;">Level</th>
+    <th>Status</th>
+  </tr></thead>
+  <tbody>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Supervisor Architecture" data-tt-desc="server.py: TOOL_DISPATCH dict + TOOL_METADATA with per-tool timeout/retry; supervise_consultation tool tracks workflow progress and suggests next actions; escalation.py classifies errors into timeout/connection/invalid_input/internal with actionable suggestions" data-tt-ref="Ch. 5"><strong>Supervisor Architecture</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Supervisor Architecture: Implemented" data-tt-desc="server.py: TOOL_DISPATCH dict + TOOL_METADATA with per-tool timeout/retry; supervise_consultation tool tracks workflow progress and suggests next actions; escalation.py classifies errors into timeout/connection/invalid_input/internal with actionable suggestions" data-tt-ref="Ch. 5">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Multi-Agent Planning" data-tt-desc="plan_consultation tool: complexity assessment (simple/moderate/complex scoring 0-100), adaptive step generation per complexity level, step params tuned to complexity (traversal depth, subagent usage, critique requirements)" data-tt-ref="Ch. 5"><strong>Multi-Agent Planning</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Multi-Agent Planning: Implemented" data-tt-desc="plan_consultation tool: complexity assessment (simple/moderate/complex scoring 0-100), adaptive step generation per complexity level, step params tuned to complexity (traversal depth, subagent usage, critique requirements)" data-tt-ref="Ch. 5">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Hybrid Delegation Framework" data-tt-desc="Static dispatch via TOOL_DISPATCH dict; no dynamic bidding or market-based task allocation. Appropriate for deterministic consultation workflow where task routing is predefined." data-tt-ref="Ch. 5"><strong>Hybrid Delegation Framework</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Hybrid Delegation Framework: N/A" data-tt-desc="Static dispatch via TOOL_DISPATCH dict; no dynamic bidding or market-based task allocation. Appropriate for deterministic consultation workflow where task routing is predefined." data-tt-ref="Ch. 5">N/A</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Shared Epistemic Memory" data-tt-desc="blackboard.py: assert_fact/query_facts with typed, versioned, append-only facts; conflict detection via detect_conflicts param; confidence scores (0.0-1.0); TTL support; convergence tracking; blackboard_facts DB table" data-tt-ref="Ch. 5"><strong>Shared Epistemic Memory</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Shared Epistemic Memory: Implemented" data-tt-desc="blackboard.py: assert_fact/query_facts with typed, versioned, append-only facts; conflict detection via detect_conflicts param; confidence scores (0.0-1.0); TTL support; convergence tracking; blackboard_facts DB table" data-tt-ref="Ch. 5">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Consensus, Negotiation &amp; Conflict Resolution" data-tt-desc="Single-supervisor deterministic model; no multi-agent voting or debate. Blackboard conflict detection (query_facts with detect_conflicts) provides lightweight consensus-adjacent mechanism but full consensus is not architecturally relevant." data-tt-ref="Ch. 5"><strong>Consensus, Negotiation &amp; Conflict Resolution</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Consensus, Negotiation &amp; Conflict Resolution: N/A" data-tt-desc="Single-supervisor deterministic model; no multi-agent voting or debate. Blackboard conflict detection (query_facts with detect_conflicts) provides lightweight consensus-adjacent mechanism but full consensus is not architecturally relevant." data-tt-ref="Ch. 5">N/A</span></td>
+  </tr>
+  </tbody></table>
+  </div>
+</div>
+<div class="cat-scorecard ani">
+  <div class="cat-scorecard-header">
+    <h3>Explainability &amp; Compliance</h3>
+    <span class="status-badge rating-established">&#x2713; Established</span>
+  </div>
+  <div class="cat-scorecard-body">
+  <table class="scorecard-table">
+  <thead><tr>
+    <th>Pattern</th>
+    <th style="text-align:center;">Level</th>
+    <th>Status</th>
+  </tr></thead>
+  <tbody>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Basic Audit Logging" data-tt-desc="consultation_steps JSON in consultations table logs every tool invocation with timestamps, step_type, and metadata; consultation_quality tracks ratings; consultation_events logs all events; blackboard_facts is append-only audit trail" data-tt-ref="Ch. 6"><strong>Basic Audit Logging</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Basic Audit Logging: Implemented" data-tt-desc="consultation_steps JSON in consultations table logs every tool invocation with timestamps, step_type, and metadata; consultation_quality tracks ratings; consultation_events logs all events; blackboard_facts is append-only audit trail" data-tt-ref="Ch. 6">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Instruction Fidelity Auditing" data-tt-desc="critique_consultation tool: deterministic quality audit checking workflow completeness, traversal depth, assessment coverage, passage diversity, critical edges; returns prompt_mutations for adaptive retry; multi-iteration support (1-3) with convergence detection" data-tt-ref="Ch. 6"><strong>Instruction Fidelity Auditing</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Instruction Fidelity Auditing: Implemented" data-tt-desc="critique_consultation tool: deterministic quality audit checking workflow completeness, traversal depth, assessment coverage, passage diversity, critical edges; returns prompt_mutations for adaptive retry; multi-iteration support (1-3) with convergence detection" data-tt-ref="Ch. 6">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Persistent Instruction Anchoring" data-tt-desc="393-line INSTRUCTIONS string embedded in server.py; returned as prompt resource; defines 7-step workflow, narration style, tone guidelines; critique_consultation validates adherence to workflow steps" data-tt-ref="Ch. 6"><strong>Persistent Instruction Anchoring</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Persistent Instruction Anchoring: Implemented" data-tt-desc="393-line INSTRUCTIONS string embedded in server.py; returned as prompt resource; defines 7-step workflow, narration style, tone guidelines; critique_consultation validates adherence to workflow steps" data-tt-ref="Ch. 6">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Causal Dependency Graph" data-tt-desc="consultation_steps JSON already captures the temporal sequence of tool calls. Upgrading this to a formal DAG — where each step references its input steps — would enable lineage queries like &#x27;which pattern assessments influenced this score?&#x27; and &#x27;which book passages informed this recommendation?&#x27;" data-tt-ref="Ch. 6"><strong>Causal Dependency Graph</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Causal Dependency Graph: Partial" data-tt-desc="consultation_steps JSON already captures the temporal sequence of tool calls. Upgrading this to a formal DAG — where each step references its input steps — would enable lineage queries like &#x27;which pattern assessments influenced this score?&#x27; and &#x27;which book passages informed this recommendation?&#x27;" data-tt-ref="Ch. 6">Partial</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Fractal CoT Embedding" data-tt-desc="System does not generate chain-of-thought traces that need embedding; consultation steps are structured tool calls, not free-form reasoning. Critique tool validates workflow adherence, not CoT quality." data-tt-ref="Ch. 6"><strong>Fractal CoT Embedding</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Fractal CoT Embedding: N/A" data-tt-desc="System does not generate chain-of-thought traces that need embedding; consultation steps are structured tool calls, not free-form reasoning. Critique tool validates workflow adherence, not CoT quality." data-tt-ref="Ch. 6">N/A</span></td>
+  </tr>
+  </tbody></table>
+  </div>
+</div>
+<div class="cat-scorecard ani">
+  <div class="cat-scorecard-header">
+    <h3>Robustness &amp; Fault Tolerance</h3>
+    <span class="status-badge rating-established">&#x2713; Established</span>
+  </div>
+  <div class="cat-scorecard-body">
+  <table class="scorecard-table">
+  <thead><tr>
+    <th>Pattern</th>
+    <th style="text-align:center;">Level</th>
+    <th>Status</th>
+  </tr></thead>
+  <tbody>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Watchdog Timeout" data-tt-desc="server.py: asyncio.wait_for wraps every tool call with TOOL_TIMEOUT_SECONDS=30; per-tool timeout overrides in TOOL_METADATA; timeout triggers escalation with retryable=true and actionable suggestion" data-tt-ref="Ch. 7"><strong>Watchdog Timeout</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Watchdog Timeout: Implemented" data-tt-desc="server.py: asyncio.wait_for wraps every tool call with TOOL_TIMEOUT_SECONDS=30; per-tool timeout overrides in TOOL_METADATA; timeout triggers escalation with retryable=true and actionable suggestion" data-tt-ref="Ch. 7">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Simple Retry Mechanism" data-tt-desc="server.py: TOOL_MAX_RETRIES=2 with exponential backoff (delay=base×2^attempt); retries only for RETRYABLE_EXCEPTIONS (asyncio.TimeoutError, ConnectionError, OSError); non-retryable errors escalate immediately" data-tt-ref="Ch. 7"><strong>Simple Retry Mechanism</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Simple Retry Mechanism: Implemented" data-tt-desc="server.py: TOOL_MAX_RETRIES=2 with exponential backoff (delay=base×2^attempt); retries only for RETRYABLE_EXCEPTIONS (asyncio.TimeoutError, ConnectionError, OSError); non-retryable errors escalate immediately" data-tt-ref="Ch. 7">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Adaptive Retry with Prompt Mutation" data-tt-desc="critique_consultation returns prompt_mutations for adaptive retry — suggested tool calls to address gaps. However, the retry itself is at the workflow level (Claude re-calls tools), not at the LLM prompt level. No automatic prompt modification on failure." data-tt-ref="Ch. 7"><strong>Adaptive Retry with Prompt Mutation</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Adaptive Retry with Prompt Mutation: Partial" data-tt-desc="critique_consultation returns prompt_mutations for adaptive retry — suggested tool calls to address gaps. However, the retry itself is at the workflow level (Claude re-calls tools), not at the LLM prompt level. No automatic prompt modification on failure." data-tt-ref="Ch. 7">Partial</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Auto-Healing Agent Resuscitation" data-tt-desc="The write-behind buffer and incremental checkpointing already preserve state after crashes. The missing piece is automatic restart: a process supervisor (or asyncio task wrapper) that detects crashed tool handlers and restarts them from the last flushed checkpoint." data-tt-ref="Ch. 7"><strong>Auto-Healing Agent Resuscitation</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Auto-Healing Agent Resuscitation: Missing" data-tt-desc="The write-behind buffer and incremental checkpointing already preserve state after crashes. The missing piece is automatic restart: a process supervisor (or asyncio task wrapper) that detects crashed tool handlers and restarts them from the last flushed checkpoint." data-tt-ref="Ch. 7">Missing</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Incremental Checkpointing" data-tt-desc="db.py: write-behind step buffer persists consultation steps; log_consultation_step() buffers in memory, auto-flushed on reads; consultation_state table tracks shared state; consultations table stores matched_concept_ids and steps JSON; flush_all_steps() in close_connection() prevents data loss" data-tt-ref="Ch. 7"><strong>Incremental Checkpointing</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Incremental Checkpointing: Implemented" data-tt-desc="db.py: write-behind step buffer persists consultation steps; log_consultation_step() buffers in memory, auto-flushed on reads; consultation_state table tracks shared state; consultations table stores matched_concept_ids and steps JSON; flush_all_steps() in close_connection() prevents data loss" data-tt-ref="Ch. 7">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Fallback Model Invocation" data-tt-desc="embed.py uses only text-embedding-3-small with no fallback. Adding a secondary embedding provider (e.g., Cohere embed-v3 or a local sentence-transformers model) with automatic failover on 5xx/timeout would close the biggest single point of failure in the system." data-tt-ref="Ch. 7"><strong>Fallback Model Invocation</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Fallback Model Invocation: Missing" data-tt-desc="embed.py uses only text-embedding-3-small with no fallback. Adding a secondary embedding provider (e.g., Cohere embed-v3 or a local sentence-transformers model) with automatic failover on 5xx/timeout would close the biggest single point of failure in the system." data-tt-ref="Ch. 7">Missing</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Rate-Limited Invocation" data-tt-desc="embed.py already handles per-request rate limiting with 429 detection and exponential backoff. The gap is global coordination: when 4 subagents call get_subgraph simultaneously, each triggers independent embedding requests. An asyncio.Semaphore(3) wrapping the embedding call would prevent thundering herd effects." data-tt-ref="Ch. 7"><strong>Rate-Limited Invocation</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Rate-Limited Invocation: Partial" data-tt-desc="embed.py already handles per-request rate limiting with 429 detection and exponential backoff. The gap is global coordination: when 4 subagents call get_subgraph simultaneously, each triggers independent embedding requests. An asyncio.Semaphore(3) wrapping the embedding call would prevent thundering herd effects." data-tt-ref="Ch. 7">Partial</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Majority Voting Across Agents" data-tt-desc="Single-supervisor deterministic model; subagents explore different concepts, not redundant views of the same concept. Blackboard conflict detection serves the convergence need." data-tt-ref="Ch. 7"><strong>Majority Voting Across Agents</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Majority Voting Across Agents: N/A" data-tt-desc="Single-supervisor deterministic model; subagents explore different concepts, not redundant views of the same concept. Blackboard conflict detection serves the convergence need." data-tt-ref="Ch. 7">N/A</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Trust Decay &amp; Scoring" data-tt-desc="No dynamic trust scoring for subagents or tools; all tools treated equally regardless of historical reliability. consultation_quality tracks ratings but doesn&#x27;t feed back into routing decisions." data-tt-ref="Ch. 7"><strong>Trust Decay &amp; Scoring</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Trust Decay &amp; Scoring: Missing" data-tt-desc="No dynamic trust scoring for subagents or tools; all tools treated equally regardless of historical reliability. consultation_quality tracks ratings but doesn&#x27;t feed back into routing decisions." data-tt-ref="Ch. 7">Missing</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Canary Agent Testing" data-tt-desc="No canary deployment or A/B testing mechanism for tool updates; all changes go live immediately. 134 pytest tests provide pre-deployment validation but no runtime canary." data-tt-ref="Ch. 7"><strong>Canary Agent Testing</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Canary Agent Testing: Missing" data-tt-desc="No canary deployment or A/B testing mechanism for tool updates; all changes go live immediately. 134 pytest tests provide pre-deployment validation but no runtime canary." data-tt-ref="Ch. 7">Missing</span></td>
+  </tr>
+  </tbody></table>
+  </div>
+</div>
+<div class="cat-scorecard ani">
+  <div class="cat-scorecard-header">
+    <h3>Human-Agent Interaction</h3>
+    <span class="status-badge rating-mature">&#x2605; Mature</span>
+  </div>
+  <div class="cat-scorecard-body">
+  <table class="scorecard-table">
+  <thead><tr>
+    <th>Pattern</th>
+    <th style="text-align:center;">Level</th>
+    <th>Status</th>
+  </tr></thead>
+  <tbody>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Human Calls Agent" data-tt-desc="User initiates consultation via match_concepts with project description; MCP stdio transport receives requests from Claude Desktop/CLI; rate_consultation provides feedback channel" data-tt-ref="Ch. 8"><strong>Human Calls Agent</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Human Calls Agent: Implemented" data-tt-desc="User initiates consultation via match_concepts with project description; MCP stdio transport receives requests from Claude Desktop/CLI; rate_consultation provides feedback channel" data-tt-ref="Ch. 8">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Agent Calls Human" data-tt-desc="Step 7 asks user approval before generating implementation plan; critique_consultation surfaces issues for human review; supervise_consultation provides progress updates for human oversight" data-tt-ref="Ch. 8"><strong>Agent Calls Human</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Agent Calls Human: Implemented" data-tt-desc="Step 7 asks user approval before generating implementation plan; critique_consultation surfaces issues for human review; supervise_consultation provides progress updates for human oversight" data-tt-ref="Ch. 8">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Agent Delegates to Agent" data-tt-desc="Scatter-gather workflow in INSTRUCTIONS: Claude spawns parallel subagents per seed concept, each independently calling get_subgraph; results merged; validate_subagent checks structural + semantic validity of subagent responses" data-tt-ref="Ch. 8"><strong>Agent Delegates to Agent</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Agent Delegates to Agent: Implemented" data-tt-desc="Scatter-gather workflow in INSTRUCTIONS: Claude spawns parallel subagents per seed concept, each independently calling get_subgraph; results merged; validate_subagent checks structural + semantic validity of subagent responses" data-tt-ref="Ch. 8">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Agent Calls Proxy Agent" data-tt-desc="No external third-party API interactions requiring proxy; OpenAI and MotherDuck are internal infrastructure, not external services requiring proxy isolation" data-tt-ref="Ch. 8"><strong>Agent Calls Proxy Agent</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Agent Calls Proxy Agent: N/A" data-tt-desc="No external third-party API interactions requiring proxy; OpenAI and MotherDuck are internal infrastructure, not external services requiring proxy isolation" data-tt-ref="Ch. 8">N/A</span></td>
+  </tr>
+  </tbody></table>
+  </div>
+</div>
+<div class="cat-scorecard ani">
+  <div class="cat-scorecard-header">
+    <h3>Agent-Level Capabilities</h3>
+    <span class="status-badge rating-established">&#x2713; Established</span>
+  </div>
+  <div class="cat-scorecard-body">
+  <table class="scorecard-table">
+  <thead><tr>
+    <th>Pattern</th>
+    <th style="text-align:center;">Level</th>
+    <th>Status</th>
+  </tr></thead>
+  <tbody>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Single Agent Baseline" data-tt-desc="The system works as a single-agent baseline when subagents are unavailable; INSTRUCTIONS include fallback: &#x27;If subagents are not available, call get_subgraph directly with compact defaults&#x27;. plan_consultation generates simpler plans for simple complexity." data-tt-ref="Ch. 9"><strong>Single Agent Baseline</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Single Agent Baseline: Implemented" data-tt-desc="The system works as a single-agent baseline when subagents are unavailable; INSTRUCTIONS include fallback: &#x27;If subagents are not available, call get_subgraph directly with compact defaults&#x27;. plan_consultation generates simpler plans for simple complexity." data-tt-ref="Ch. 9">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Agent-Specific Memory (Short-Term)" data-tt-desc="consultation_state table provides per-session key-value memory; blackboard_facts provides typed per-agent memory with agent_id; write-behind buffer maintains in-memory state during session" data-tt-ref="Ch. 9"><strong>Agent-Specific Memory (Short-Term)</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Agent-Specific Memory (Short-Term): Implemented" data-tt-desc="consultation_state table provides per-session key-value memory; blackboard_facts provides typed per-agent memory with agent_id; write-behind buffer maintains in-memory state during session" data-tt-ref="Ch. 9">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Context-Aware Retrieval (Simple RAG)" data-tt-desc="ask_book: embeds question, cosine similarity against section_embeddings, scopes to concept_ids; returns passages with chapter/page/score; 786 sections indexed" data-tt-ref="Ch. 9"><strong>Context-Aware Retrieval (Simple RAG)</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Context-Aware Retrieval (Simple RAG): Implemented" data-tt-desc="ask_book: embeds question, cosine similarity against section_embeddings, scopes to concept_ids; returns passages with chapter/page/score; 786 sections indexed" data-tt-ref="Ch. 9">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Advanced RAG" data-tt-desc="ask_book already scopes by concept_ids and generates suggested_questions from graph edges. Adding re-ranking (cross-encoder scoring of top-k results) and query transformation (reformulating questions based on initial results) would significantly improve passage relevance for complex questions." data-tt-ref="Ch. 9"><strong>Advanced RAG</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Advanced RAG: Partial" data-tt-desc="ask_book already scopes by concept_ids and generates suggested_questions from graph edges. Adding re-ranking (cross-encoder scoring of top-k results) and query transformation (reformulating questions based on initial results) would significantly improve passage relevance for complex questions." data-tt-ref="Ch. 9">Partial</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Agentic RAG &amp; Graph-Vector Hybrid Retrieval" data-tt-desc="Full graph-vector hybrid: get_subgraph (graph traversal) + ask_book (vector retrieval) used together in workflow; concepts discovered via graph inform RAG scoping; suggested_questions from graph edges drive iterative retrieval; knowledge graph + embeddings combined" data-tt-ref="Ch. 9"><strong>Agentic RAG &amp; Graph-Vector Hybrid Retrieval</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Agentic RAG &amp; Graph-Vector Hybrid Retrieval: Implemented" data-tt-desc="Full graph-vector hybrid: get_subgraph (graph traversal) + ask_book (vector retrieval) used together in workflow; concepts discovered via graph inform RAG scoping; suggested_questions from graph edges drive iterative retrieval; knowledge graph + embeddings combined" data-tt-ref="Ch. 9">Implemented</span></td>
+  </tr>
+  </tbody></table>
+  </div>
+</div>
+<div class="cat-scorecard ani">
+  <div class="cat-scorecard-header">
+    <h3>System-Level Infrastructure</h3>
+    <span class="status-badge rating-emerging">&#x25B2; Emerging</span>
+  </div>
+  <div class="cat-scorecard-body">
+  <table class="scorecard-table">
+  <thead><tr>
+    <th>Pattern</th>
+    <th style="text-align:center;">Level</th>
+    <th>Status</th>
+  </tr></thead>
+  <tbody>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Agent Authentication &amp; Authorization" data-tt-desc="The existing access_policy.py already declares read/write/admin levels per tool — a strong foundation. The next step is runtime enforcement: validate access levels in call_tool() before dispatch, returning an escalation response for unauthorized calls. For stdio transport this is lightweight; for future HTTP transport it becomes essential." data-tt-ref="Ch. 10"><strong>Agent Authentication &amp; Authorization</strong></td>
+    <td class="level-cell">Basic</td>
+    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Agent Authentication &amp; Authorization: Partial" data-tt-desc="The existing access_policy.py already declares read/write/admin levels per tool — a strong foundation. The next step is runtime enforcement: validate access levels in call_tool() before dispatch, returning an escalation response for unauthorized calls. For stdio transport this is lightweight; for future HTTP transport it becomes essential." data-tt-ref="Ch. 10">Partial</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Tool &amp; Agent Registry" data-tt-desc="Currently adding a tool requires changes in 4 places (import, TOOL_METADATA, TOOL_DISPATCH, list_tools). A decorator-based auto-registration pattern (@register_tool with metadata) would reduce this to 1 place and enable future dynamic discovery. This is the highest-ROI infrastructure improvement." data-tt-ref="Ch. 10"><strong>Tool &amp; Agent Registry</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Tool &amp; Agent Registry: Partial" data-tt-desc="Currently adding a tool requires changes in 4 places (import, TOOL_METADATA, TOOL_DISPATCH, list_tools). A decorator-based auto-registration pattern (@register_tool with metadata) would reduce this to 1 place and enable future dynamic discovery. This is the highest-ROI infrastructure improvement." data-tt-ref="Ch. 10">Partial</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Event-Driven Reactivity" data-tt-desc="events.py: emit_event/get_events with 6 event types (gap_found, pattern_assessed, coverage_threshold_reached, coverage_dropped, plan_created, state_conflict); consultation_events table; reactive suggestions per event type; poll-based retrieval with since_id filtering" data-tt-ref="Ch. 10"><strong>Event-Driven Reactivity</strong></td>
+    <td class="level-cell">Intermediate</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Event-Driven Reactivity: Implemented" data-tt-desc="events.py: emit_event/get_events with 6 event types (gap_found, pattern_assessed, coverage_threshold_reached, coverage_dropped, plan_created, state_conflict); consultation_events table; reactive suggestions per event type; poll-based retrieval with since_id filtering" data-tt-ref="Ch. 10">Implemented</span></td>
+  </tr>
+  </tbody></table>
+  </div>
+</div>
+<div class="cat-scorecard ani">
+  <div class="cat-scorecard-header">
+    <h3>Continuous Improvement</h3>
+    <span class="status-badge rating-mature">&#x2605; Mature</span>
+  </div>
+  <div class="cat-scorecard-body">
+  <table class="scorecard-table">
+  <thead><tr>
+    <th>Pattern</th>
+    <th style="text-align:center;">Level</th>
+    <th>Status</th>
+  </tr></thead>
+  <tbody>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Hybrid Workflow Agent Architecture (Planner + Scorer)" data-tt-desc="plan_consultation (planner) + score_architecture (scorer) + critique_consultation (feedback loop); generate_implementation_plan classifies steps as mechanical vs design_decision; render_report synthesizes planner and scorer outputs" data-tt-ref="Ch. 14"><strong>Hybrid Workflow Agent Architecture (Planner + Scorer)</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Hybrid Workflow Agent Architecture (Planner + Scorer): Implemented" data-tt-desc="plan_consultation (planner) + score_architecture (scorer) + critique_consultation (feedback loop); generate_implementation_plan classifies steps as mechanical vs design_decision; render_report synthesizes planner and scorer outputs" data-tt-ref="Ch. 14">Implemented</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Coevolved Agent Training" data-tt-desc="System uses pre-trained LLMs (Claude, OpenAI embeddings); no agent training or fine-tuning loop. Consultation quality feedback does not feed into model training." data-tt-ref="Ch. 14"><strong>Coevolved Agent Training</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Coevolved Agent Training: N/A" data-tt-desc="System uses pre-trained LLMs (Claude, OpenAI embeddings); no agent training or fine-tuning loop. Consultation quality feedback does not feed into model training." data-tt-ref="Ch. 14">N/A</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Preference-Controlled Synthetic Data Generation" data-tt-desc="No synthetic data generation; system consults against pre-existing knowledge graph extracted from book. Test cases in cases.py are manually curated, not synthetically generated." data-tt-ref="Ch. 14"><strong>Preference-Controlled Synthetic Data Generation</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Preference-Controlled Synthetic Data Generation: N/A" data-tt-desc="No synthetic data generation; system consults against pre-existing knowledge graph extracted from book. Test cases in cases.py are manually curated, not synthetically generated." data-tt-ref="Ch. 14">N/A</span></td>
+  </tr>
+  <tr>
+    <td class="has-tooltip" data-tt-title="Custom Evaluation Metrics" data-tt-desc="Category-based rubric with 36 patterns × binary indicators; consultation_analytics surfaces trends (avg rating, coverage, pattern counts); rate_consultation captures user quality scores; critique_consultation provides deterministic quality metrics" data-tt-ref="Ch. 14"><strong>Custom Evaluation Metrics</strong></td>
+    <td class="level-cell">Advanced</td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Custom Evaluation Metrics: Implemented" data-tt-desc="Category-based rubric with 36 patterns × binary indicators; consultation_analytics surfaces trends (avg rating, coverage, pattern counts); rate_consultation captures user quality scores; critique_consultation provides deterministic quality metrics" data-tt-ref="Ch. 14">Implemented</span></td>
+  </tr>
+  </tbody></table>
+  </div>
+</div>
+</section>
+
+<!-- ARCHITECTURE DIAGRAMS -->
+<section id="architecture">
+<h2 class="ani">Architecture: Current &amp; Target</h2>
+<p class="subtitle">Blue = existing, red dashed = opportunities for growth, green = new additions in target state.</p>
+<div class="diagram-row">
+  <div class="mermaid-wrap ani" data-tooltips="tooltips-current">
+    <div class="zoom-controls">
+      <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+      <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+      <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+      <button onclick="openDiagramWindow(this)" title="Open in new window">&#x29C9;</button>
+    </div>
+    <span class="mermaid-title">Current Architecture</span>
+    <pre class="mermaid">
+flowchart TD
+    User([👤 User]):::existing --> Claude[🧠 Claude Consultant]:::existing
+    Claude --> MC[match_concepts]:::existing
+    Claude --> PC[plan_consultation]:::existing
+    Claude --> SC[supervise_consultation]:::existing
+    
+    Claude --> |scatter-gather| Sub1[🔍 Subagent 1]:::existing
+    Claude --> |scatter-gather| Sub2[🔍 Subagent 2]:::existing
+    Claude --> |scatter-gather| Sub3[🔍 Subagent 3]:::existing
+    
+    Sub1 --> GS[get_subgraph]:::existing
+    Sub2 --> GS
+    Sub3 --> GS
+    
+    Sub1 --> BB[Blackboard Hub]:::existing
+    Sub2 --> BB
+    Sub3 --> BB
+    
+    Claude --> AB[ask_book RAG]:::existing
+    Claude --> LPA[log_pattern_assessment]:::existing
+    Claude --> SA[score_architecture]:::existing
+    Claude --> CC[critique_consultation]:::existing
+    Claude --> RR[render_report]:::existing
+    
+    GS --> KG[(Knowledge Graph\n138 concepts\n786 sections)]:::existing
+    AB --> KG
+    MC --> EMB[OpenAI Embeddings]:::existing
+    AB --> EMB
+    
+    LPA --> DB[(MotherDuck\n12 tables)]:::existing
+    SA --> DB
+    CC --> DB
+    BB --> DB
+    SC --> DB
+    RR --> DB
+    
+    Claude --> EV[Event Bus]:::existing
+    EV --> DB
+    
+    classDef existing fill:#3b82f6,stroke:#1e40af,color:white
+    classDef opportunity fill:white,stroke:#ef4444,stroke-dasharray:5 5,color:#ef4444
+    </pre>
+  </div>
+  <div class="mermaid-wrap ani" data-tooltips="tooltips-target">
+    <div class="zoom-controls">
+      <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+      <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+      <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+      <button onclick="openDiagramWindow(this)" title="Open in new window">&#x29C9;</button>
+    </div>
+    <span class="mermaid-title">Target Architecture</span>
+    <pre class="mermaid">
+flowchart TD
+    User([👤 User]):::existing --> Claude[🧠 Claude Consultant]:::existing
+    Claude --> MC[match_concepts]:::existing
+    Claude --> PC[plan_consultation]:::existing
+    Claude --> SC[supervise_consultation]:::existing
+    
+    Claude --> |scatter-gather| Sub1[🔍 Subagent 1]:::existing
+    Claude --> |scatter-gather| Sub2[🔍 Subagent 2]:::existing
+    Claude --> |scatter-gather| Sub3[🔍 Subagent 3]:::existing
+    
+    Sub1 --> GS[get_subgraph]:::existing
+    Sub2 --> GS
+    Sub3 --> GS
+    
+    Sub1 --> BB[Blackboard Hub]:::existing
+    Sub2 --> BB
+    Sub3 --> BB
+    
+    Claude --> AB[ask_book RAG]:::existing
+    Claude --> LPA[log_pattern_assessment]:::existing
+    Claude --> SA[score_architecture]:::existing
+    Claude --> CC[critique_consultation]:::existing
+    Claude --> RR[render_report]:::existing
+    
+    GS --> KG[(Knowledge Graph\n138 concepts\n786 sections)]:::existing
+    AB --> KG
+    MC --> EMB[OpenAI Embeddings]:::existing
+    AB --> EMB
+    
+    LPA --> DB[(MotherDuck\n12 tables)]:::existing
+    SA --> DB
+    CC --> DB
+    BB --> DB
+    SC --> DB
+    RR --> DB
+    
+    Claude --> EV[Event Bus]:::existing
+    EV --> DB
+    
+    EMB -.-> FMI[Fallback Model\nInvocation]:::newpattern
+    FMI -.-> EMB2[Backup Embedding\nProvider]:::newpattern
+    
+    Claude -.-> RL[Global Rate\nLimiter]:::newpattern
+    RL -.-> EMB
+    RL -.-> DB
+    
+    Claude -.-> STG[Supervision Tree\nGuarded Capabilities]:::newpattern
+    STG -.-> Sub1
+    STG -.-> Sub2
+    STG -.-> Sub3
+    
+    STG -.-> AH[Auto-Healing\nResuscitation]:::newpattern
+    
+    Claude -.-> TR[Tool & Agent\nDynamic Registry]:::newpattern
+    TR -.-> GS
+    TR -.-> AB
+    TR -.-> SA
+    
+    Claude -.-> CDG[Causal Dependency\nGraph]:::newpattern
+    CDG -.-> DB
+    
+    classDef existing fill:#3b82f6,stroke:#1e40af,color:white
+    classDef newpattern fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#15803d
+    </pre>
+  </div>
+</div>
+</section>
+
+<!-- IMPLEMENTATION RECOMMENDATIONS -->
+<section id="recommendations">
+<h2 class="ani">Implementation Recommendations</h2>
+<div class="rec-phase phase-1 ani">
+  <div class="phase-header">Phase 1: System-Level Infrastructure  <span class="status-badge rating-emerging" style="margin-left:8px;font-size:11px;">Currently Emerging</span></div>
+  <div class="rec-cards">
+    <div class="rec-card">
+      <h4>Agent Authentication &amp; Authorization <span class="priority-badge priority-critical">Critical</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Basic pattern</div>
+      <p>The existing access_policy.py already declares read/write/admin levels per tool — a strong foundation. The next step is runtime enforcement: validate access levels in call_tool() before dispatch, returning an escalation response for unauthorized calls. For stdio transport this is lightweight; for future HTTP transport it becomes essential.</p>
+    </div>
+    <div class="rec-card">
+      <h4>Tool &amp; Agent Registry <span class="priority-badge priority-critical">Critical</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
+      <p>Currently adding a tool requires changes in 4 places (import, TOOL_METADATA, TOOL_DISPATCH, list_tools). A decorator-based auto-registration pattern (@register_tool with metadata) would reduce this to 1 place and enable future dynamic discovery. This is the highest-ROI infrastructure improvement.</p>
+    </div>
+  </div>
+</div>
+<div class="rec-phase phase-2 ani">
+  <div class="phase-header">Phase 2: Explainability &amp; Compliance  <span class="status-badge rating-established" style="margin-left:8px;font-size:11px;">Currently Established</span></div>
+  <div class="rec-cards">
+    <div class="rec-card">
+      <h4>Causal Dependency Graph <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
+      <p>consultation_steps JSON already captures the temporal sequence of tool calls. Upgrading this to a formal DAG — where each step references its input steps — would enable lineage queries like &#x27;which pattern assessments influenced this score?&#x27; and &#x27;which book passages informed this recommendation?&#x27;</p>
+    </div>
+  </div>
+</div>
+<div class="rec-phase phase-3 ani">
+  <div class="phase-header">Phase 3: Robustness &amp; Fault Tolerance  <span class="status-badge rating-established" style="margin-left:8px;font-size:11px;">Currently Established</span></div>
+  <div class="rec-cards">
+    <div class="rec-card">
+      <h4>Adaptive Retry with Prompt Mutation <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
+      <p>An intelligent retry mechanism that modifies the prompt after a deterministic failure by rephrasing instructions, adding few-shot examples, requesting chain-of-thought reasoning, or tightening output constraints, guiding a confused LLM out of a cognitive failure loop rather than simply resending the same failing request.</p>
+    </div>
+    <div class="rec-card">
+      <h4>Auto-Healing Agent Resuscitation <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
+      <p>The write-behind buffer and incremental checkpointing already preserve state after crashes. The missing piece is automatic restart: a process supervisor (or asyncio task wrapper) that detects crashed tool handlers and restarts them from the last flushed checkpoint.</p>
+    </div>
+    <div class="rec-card">
+      <h4>Fallback Model Invocation <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
+      <p>embed.py uses only text-embedding-3-small with no fallback. Adding a secondary embedding provider (e.g., Cohere embed-v3 or a local sentence-transformers model) with automatic failover on 5xx/timeout would close the biggest single point of failure in the system.</p>
+    </div>
+    <div class="rec-card">
+      <h4>Rate-Limited Invocation <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
+      <p>embed.py already handles per-request rate limiting with 429 detection and exponential backoff. The gap is global coordination: when 4 subagents call get_subgraph simultaneously, each triggers independent embedding requests. An asyncio.Semaphore(3) wrapping the embedding call would prevent thundering herd effects.</p>
+    </div>
+    <div class="rec-card">
+      <h4>Trust Decay &amp; Scoring <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Advanced pattern</div>
+      <p>A pattern implementing dynamic trust scores for each worker agent, updated based on task outcomes (success increases score, failure decreases it) with gradual decay, enabling orchestrators to self-optimize by routing tasks to the most reliable agents and gracefully sidelining degrading ones.</p>
+    </div>
+    <div class="rec-card">
+      <h4>Canary Agent Testing <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Advanced pattern</div>
+      <p>A deployment safety pattern (also known as Shadow Mode Deployment) that deploys a new agent version alongside the stable version, routing live traffic to the stable agent while simultaneously sending copies of requests to the canary for background testing, enabling data-driven validation of updates without impacting production users.</p>
+    </div>
+  </div>
+</div>
+<div class="rec-phase phase-3 ani">
+  <div class="phase-header">Phase 4: Agent-Level Capabilities  <span class="status-badge rating-established" style="margin-left:8px;font-size:11px;">Currently Established</span></div>
+  <div class="rec-cards">
+    <div class="rec-card">
+      <h4>Advanced RAG <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
+      <p>ask_book already scopes by concept_ids and generates suggested_questions from graph edges. Adding re-ranking (cross-encoder scoring of top-k results) and query transformation (reformulating questions based on initial results) would significantly improve passage relevance for complex questions.</p>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- FAILURE RECOVERY CHAIN -->
+<section id="failure-chain">
+<h2 class="ani">Failure Recovery Chain (Ch. 7)</h2>
+<p class="subtitle">The recommended 5-step recovery chain. 3 of 5 steps covered.</p>
+
+<div style="display:flex;align-items:center;gap:16px;margin:20px 0;">
+  <div class="chain-coverage" data-count="60">60</div>
+  <div style="font-size:1.1rem;font-weight:700;">% Chain Coverage</div>
+</div>
+
+<div class="chain-steps ani">
+  <div class="chain-step implemented">
+    <span class="step-num">Step 1</span>
+    <span class="step-name">Simple Retry</span>
+    <span class="step-status">Implemented</span>
+    <span style="font-size:11px;color:var(--text-dim)">Retry with exponential backoff</span>
+  </div>
+  <div class="chain-arrow">&rarr;</div>
+  <div class="chain-step missing">
+    <span class="step-num">Step 2</span>
+    <span class="step-name">Auto-Healing Agent Resuscitation</span>
+    <span class="step-status">Missing</span>
+    <span style="font-size:11px;color:var(--text-dim)">Automatically restart the agent process</span>
+  </div>
+  <div class="chain-arrow">&rarr;</div>
+  <div class="chain-step missing">
+    <span class="step-num">Step 3</span>
+    <span class="step-name">Fallback Model Invocation</span>
+    <span class="step-status">Missing</span>
+    <span style="font-size:11px;color:var(--text-dim)">Switch to fallback model or redundant agent</span>
+  </div>
+  <div class="chain-arrow">&rarr;</div>
+  <div class="chain-step implemented">
+    <span class="step-num">Step 4</span>
+    <span class="step-name">Delayed Escalation / Agent Calls Human</span>
+    <span class="step-status">Implemented</span>
+    <span style="font-size:11px;color:var(--text-dim)">Escalate to human operator with full context</span>
+  </div>
+  <div class="chain-arrow">&rarr;</div>
+  <div class="chain-step implemented">
+    <span class="step-num">Step 5</span>
+    <span class="step-name">Watchdog Timeout Supervisor</span>
+    <span class="step-status">Implemented</span>
+    <span style="font-size:11px;color:var(--text-dim)">Timeout terminates unresponsive agent, alerts system</span>
+  </div>
+</div>
+</section>
+
+<!-- STRESS TEST -->
+<section id="stress-test">
+<h2 class="ani">Stress Test: Resilience Considerations</h2>
+<p class="subtitle">Concrete scenarios illustrating how strengthening partial patterns protects the system.</p>
+
+<details class="scenario ani">
+  <summary>
+    <span class="severity-tag severity-critical">CRITICAL</span>
+    Strengthening Agent Authentication &amp; Authorization → Agent accesses sensitive data or external API
+  </summary>
+  <div class="scenario-body">
+    <div class="cascade-step">
+      <span class="cascade-num">1</span>
+      <div>Agent with a defect accesses all resources</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">2</span>
+      <div>potential data exposure or unauthorized action</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">3</span>
+      <div>no audit trail of access</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">4</span>
+      <div>limited forensics if an incident occurs</div>
+    </div>
+    <p style="margin-top:12px;font-size:0.85rem;"><strong>Recovery:</strong> Implement Agent Authentication &amp; Authorization (Ch. 10)</p>
+    <div class="book-ref">Ch. 10 &mdash; Agent Authentication &amp; Authorization</div>
+  </div>
+</details>
+
+<details class="scenario ani">
+  <summary>
+    <span class="severity-tag severity-critical">CRITICAL</span>
+    Strengthening Tool &amp; Agent Registry → New agent or tool added to the system
+  </summary>
+  <div class="scenario-body">
+    <div class="cascade-step">
+      <span class="cascade-num">1</span>
+      <div>New capability added but not discoverable <span class="cascade-ref">server.py:1</span></div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">2</span>
+      <div>orchestrator can&#x27;t route to it</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">3</span>
+      <div>capability unused</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">4</span>
+      <div>manual config changes needed for every addition</div>
+    </div>
+    <p style="margin-top:12px;font-size:0.85rem;"><strong>Recovery:</strong> Implement Tool &amp; Agent Registry (Ch. 10)</p>
+    <p style="margin-top:8px;font-size:0.85rem;color:var(--amber);"><strong>Foundation dependency:</strong> Tool &amp; Agent Registry (intermediate) is not yet in place — these higher-level patterns would benefit from it as a foundation</p>
+    <div class="book-ref">Ch. 10 &mdash; Tool and Agent Registry</div>
+  </div>
+</details>
+
+<details class="scenario ani">
+  <summary>
+    <span class="severity-tag severity-warning">WARNING</span>
+    Strengthening Adaptive Retry with Prompt Mutation → Agent fails deterministically on same input
+  </summary>
+  <div class="scenario-body">
+    <div class="cascade-step">
+      <span class="cascade-num">1</span>
+      <div>Prompt misinterpretation causes wrong output</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">2</span>
+      <div>retry sends same prompt</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">3</span>
+      <div>same output repeated N times</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">4</span>
+      <div>retries exhausted</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">5</span>
+      <div>task cannot complete without prompt adjustment</div>
+    </div>
+    <p style="margin-top:12px;font-size:0.85rem;"><strong>Recovery:</strong> Implement Adaptive Retry with Prompt Mutation (Ch. 7)</p>
+    <div class="book-ref">Ch. 7 &mdash; Adaptive Retry with Prompt Mutation</div>
+  </div>
+</details>
+</section>
+
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="container">
+    Generated by <a href="https://github.com/anthropics/claude-code">Claude Code</a> using <strong>iConsult</strong> MCP &mdash;
+    Consultation ID: <code style="font-family:var(--font-mono);font-size:11px;">7789acc7952a_20260323_001122</code><br>
+    Reference: <em>Agentic Architectural Patterns for Building Multi-Agent Systems</em> (Arsanjani &amp; Bustos, Packt 2026)
+  </div>
+</footer>
+
+<!-- TOOLTIP METADATA -->
+<script type="application/json" id="tooltips-current">
+{
+  "User": {
+    "title": "User",
+    "desc": "Initiates consultation with project description via MCP stdio transport",
+    "ref": "Ch. 8 \u2014 Human Calls Agent"
+  },
+  "Claude": {
+    "title": "Claude Consultant",
+    "desc": "Primary orchestrator executing the 7-step consultation workflow with adaptive planning",
+    "ref": "Ch. 5 \u2014 Supervisor Architecture"
+  },
+  "MC": {
+    "title": "match_concepts",
+    "desc": "Deterministic embedding match \u2014 SHA-256 fingerprint ensures reproducibility",
+    "ref": "Ch. 9 \u2014 Context-Aware Retrieval"
+  },
+  "PC": {
+    "title": "plan_consultation",
+    "desc": "Complexity assessment (0-100) generates adaptive step sequence",
+    "ref": "Ch. 5 \u2014 Multi-Agent Planning"
+  },
+  "SC": {
+    "title": "supervise_consultation",
+    "desc": "Tracks workflow progress, suggests next action with tool + params",
+    "ref": "Ch. 5 \u2014 Supervisor Architecture"
+  },
+  "Sub1": {
+    "title": "Graph Explorer Subagent",
+    "desc": "Independently traverses concept neighborhood, asserts facts to blackboard",
+    "ref": "Ch. 8 \u2014 Agent Delegates to Agent"
+  },
+  "GS": {
+    "title": "get_subgraph",
+    "desc": "Priority-queue BFS traversal up to max_hops with confidence filtering",
+    "ref": "Ch. 9 \u2014 Agentic RAG"
+  },
+  "BB": {
+    "title": "Blackboard Knowledge Hub",
+    "desc": "Append-only typed facts with conflict detection, confidence scores, TTL",
+    "ref": "Ch. 5 \u2014 Blackboard Knowledge Hub"
+  },
+  "AB": {
+    "title": "ask_book RAG",
+    "desc": "Embeds question, cosine similarity against 786 sections, scoped to concept IDs",
+    "ref": "Ch. 9 \u2014 Context-Aware Retrieval"
+  },
+  "LPA": {
+    "title": "log_pattern_assessment",
+    "desc": "Records pattern status with evidence; auto-resolves category from rubric",
+    "ref": "Ch. 12 \u2014 Maturity Rubric"
+  },
+  "SA": {
+    "title": "score_architecture",
+    "desc": "7 categories \u00d7 3 levels deterministic scoring from logged assessments",
+    "ref": "Ch. 12 \u2014 Category-Based Rubric"
+  },
+  "CC": {
+    "title": "critique_consultation",
+    "desc": "Deterministic quality audit with prompt_mutations for adaptive retry",
+    "ref": "Ch. 6 \u2014 Instruction Fidelity Auditing"
+  },
+  "RR": {
+    "title": "render_report",
+    "desc": "Server-side HTML rendering \u2014 pulls scores/scenarios from DB, merges with narrative",
+    "ref": "Template-based rendering"
+  },
+  "KG": {
+    "title": "Knowledge Graph",
+    "desc": "138 concepts, 786 book sections, embeddings + relationships from Arsanjani & Bustos 2026",
+    "ref": "Pipeline: parse \u2192 tag \u2192 discover \u2192 build"
+  },
+  "EMB": {
+    "title": "OpenAI Embeddings",
+    "desc": "text-embedding-3-small, 1536 dims, token-aware batching with rate limit retry",
+    "ref": "embed.py"
+  },
+  "DB": {
+    "title": "MotherDuck Database",
+    "desc": "DuckDB cloud \u2014 12 tables for KG, consultations, state, events, blackboard, quality",
+    "ref": "db.py schema"
+  },
+  "EV": {
+    "title": "Event Bus",
+    "desc": "6 event types with reactive suggestions; poll-based retrieval with since_id",
+    "ref": "Ch. 10 \u2014 Event-Driven Reactivity"
+  }
+}
+</script>
+
+<script type="application/json" id="tooltips-target">
+{
+  "User": {
+    "title": "User",
+    "desc": "Initiates consultation with project description via MCP stdio transport",
+    "ref": "Ch. 8 \u2014 Human Calls Agent"
+  },
+  "Claude": {
+    "title": "Claude Consultant",
+    "desc": "Primary orchestrator with enhanced supervision tree and global rate limiting",
+    "ref": "Ch. 5 \u2014 Supervisor Architecture"
+  },
+  "FMI": {
+    "title": "Fallback Model Invocation",
+    "desc": "Automatic switch to backup embedding provider (e.g. Cohere, local model) on OpenAI outage",
+    "ref": "Ch. 7, p.238 \u2014 Fallback Model Invocation"
+  },
+  "EMB2": {
+    "title": "Backup Embedding Provider",
+    "desc": "Secondary embedding service activated when primary fails",
+    "ref": "Ch. 7 \u2014 Business Continuity"
+  },
+  "RL": {
+    "title": "Global Rate Limiter",
+    "desc": "Semaphore/token bucket coordinating all concurrent subagent API calls",
+    "ref": "Ch. 7, p.236 \u2014 Rate-Limited Invocation"
+  },
+  "STG": {
+    "title": "Supervision Tree with Guarded Capabilities",
+    "desc": "Hierarchical fault isolation \u2014 each subagent gets only its required tools; ONE_FOR_ONE restart strategy",
+    "ref": "Ch. 5, p.142 \u2014 Supervision Tree"
+  },
+  "AH": {
+    "title": "Auto-Healing Resuscitation",
+    "desc": "Automatic agent restart from last checkpoint with exponential backoff and max retry threshold",
+    "ref": "Ch. 7, p.216 \u2014 Auto-Healing"
+  },
+  "TR": {
+    "title": "Dynamic Tool & Agent Registry",
+    "desc": "Runtime registration, capability advertisement, hot-reload \u2014 replaces 4-place static registration",
+    "ref": "Ch. 10, p.311 \u2014 Tool and Agent Registry"
+  },
+  "CDG": {
+    "title": "Causal Dependency Graph",
+    "desc": "Structured DAG linking decisions to outcomes for full lineage tracing",
+    "ref": "Ch. 6 \u2014 Causal Dependency Graph"
+  }
+}
+</script>
+
+<!-- Shared tooltip element -->
+<div class="svg-tooltip" id="svg-tooltip"></div>
+
+<!-- MERMAID -->
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    themeVariables: {
+      primaryColor: isDark ? '#134e4a' : '#ccfbf1',
+      primaryBorderColor: isDark ? '#14b8a6' : '#0d9488',
+      primaryTextColor: isDark ? '#f0fdfa' : '#134e4a',
+      secondaryColor: isDark ? '#1e293b' : '#f0fdf4',
+      secondaryBorderColor: isDark ? '#059669' : '#16a34a',
+      secondaryTextColor: isDark ? '#f1f5f9' : '#1e293b',
+      tertiaryColor: isDark ? '#27201a' : '#fef3c7',
+      tertiaryBorderColor: isDark ? '#d97706' : '#f59e0b',
+      tertiaryTextColor: isDark ? '#fef3c7' : '#27201a',
+      lineColor: isDark ? '#64748b' : '#94a3b8',
+      fontSize: '14px',
+      fontFamily: "'Bricolage Grotesque', system-ui, sans-serif",
+    }
+  });
+</script>
+
+<!-- ANIMATIONS -->
+<script>
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!prefersReduced) {
+    anime({ targets: '.ani', opacity: [0, 1], translateY: [18, 0], delay: anime.stagger(60, { start: 150 }), easing: 'easeOutCubic', duration: 500 });
+    document.querySelectorAll('[data-count]').forEach(el => {
+      anime({ targets: { val: 0 }, val: parseInt(el.dataset.count), round: 1, duration: 1400, delay: 600, easing: 'easeOutExpo', update: (a) => { el.textContent = a.animations[0].currentValue; } });
+    });
+  } else {
+    document.querySelectorAll('.ani').forEach(el => el.style.opacity = 1);
+  }
+</script>
+
+<!-- ZOOM + PAN + SVG TOOLTIPS -->
+<script>
+  var INITIAL_ZOOM = 1.2;
+
+  // Zoom works by setting a CSS custom property on the .mermaid-wrap container.
+  // The inner .mermaid / svg element uses transform: scale(var(--diagram-zoom)).
+  // This avoids issues with CSS zoom not applying to SVG elements.
+
+  function zoomDiagram(btn, factor) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var current = parseFloat(wrap.dataset.zoom || INITIAL_ZOOM);
+    var next = Math.min(Math.max(current * factor, 0.5), 5);
+    wrap.dataset.zoom = next;
+    wrap.style.setProperty('--diagram-zoom', next);
+  }
+
+  function resetZoom(btn) {
+    var wrap = btn.closest('.mermaid-wrap');
+    wrap.dataset.zoom = INITIAL_ZOOM;
+    wrap.style.setProperty('--diagram-zoom', INITIAL_ZOOM);
+  }
+
+  function openDiagramWindow(btn) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var svg = wrap.querySelector('svg');
+    if (!svg) return;
+
+    var title = wrap.querySelector('.mermaid-title');
+    var titleText = title ? title.textContent : 'Architecture Diagram';
+
+    // Clone SVG and reset transform so it renders at native size
+    var svgClone = svg.cloneNode(true);
+    svgClone.style.transform = 'none';
+    svgClone.style.maxWidth = 'none';
+
+    var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var bg = isDark ? '#0c0a09' : '#faf9f7';
+    var text = isDark ? '#fafaf9' : '#1c1917';
+    var textMuted = isDark ? '#78716c' : '#a8a29e';
+    var border = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.07)';
+    var surface = isDark ? '#1c1917' : '#ffffff';
+
+    var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+      '<title>' + titleText + '</title>' +
+      '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+      '<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700&family=Fragment+Mono:wght@400;700&display=swap" rel="stylesheet">' +
+      '<style>' +
+      'body { margin: 0; background: ' + bg + '; color: ' + text + '; font-family: "Bricolage Grotesque", system-ui, sans-serif; overflow: hidden; }' +
+      '.toolbar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; display: flex; align-items: center; gap: 12px; padding: 10px 20px; background: ' + surface + '; border-bottom: 1px solid ' + border + '; }' +
+      '.toolbar h1 { font-size: 15px; font-weight: 700; flex: 1; }' +
+      '.toolbar .zoom-label { font-family: "Fragment Mono", monospace; font-size: 12px; color: ' + textMuted + '; min-width: 48px; text-align: center; }' +
+      '.toolbar button { width: 32px; height: 32px; border: 1px solid ' + border + '; background: transparent; color: ' + text + '; font-size: 16px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; }' +
+      '.toolbar button:hover { background: ' + border + '; }' +
+      '.viewport { position: absolute; top: 53px; left: 0; right: 0; bottom: 0; overflow: auto; cursor: grab; }' +
+      '.viewport.panning { cursor: grabbing; user-select: none; }' +
+      '.svg-container { transform-origin: 0 0; padding: 32px; display: inline-block; min-width: 100%; min-height: 100%; }' +
+      '</style></head><body>' +
+      '<div class="toolbar">' +
+      '  <h1>' + titleText + '</h1>' +
+      '  <button onclick="zoom(0.8)" title="Zoom out">&minus;</button>' +
+      '  <span class="zoom-label" id="zoom-label">100%</span>' +
+      '  <button onclick="zoom(1.25)" title="Zoom in">+</button>' +
+      '  <button onclick="fit()" title="Fit to window">&#8634;</button>' +
+      '</div>' +
+      '<div class="viewport" id="vp">' +
+      '  <div class="svg-container" id="sc">' + svgClone.outerHTML + '</div>' +
+      '</div>' +
+      '<script>' +
+      'var scale = 1, sc = document.getElementById("sc"), vp = document.getElementById("vp"), lbl = document.getElementById("zoom-label");' +
+      'function apply() { sc.style.transform = "scale(" + scale + ")"; lbl.textContent = Math.round(scale * 100) + "%"; }' +
+      'function zoom(f) { scale = Math.min(Math.max(scale * f, 0.1), 10); apply(); }' +
+      'function fit() {' +
+      '  var svg = sc.querySelector("svg"); if (!svg) return;' +
+      '  var sw = svg.getBBox ? svg.getBBox().width : svg.scrollWidth;' +
+      '  var sh = svg.getBBox ? svg.getBBox().height : svg.scrollHeight;' +
+      '  scale = Math.min((vp.clientWidth - 64) / sw, (vp.clientHeight - 64) / sh, 2);' +
+      '  apply();' +
+      '}' +
+      'vp.addEventListener("wheel", function(e) { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); zoom(e.deltaY < 0 ? 1.1 : 0.9); }, {passive:false});' +
+      'var sx, sy, sl, st, panning = false;' +
+      'vp.addEventListener("mousedown", function(e) { panning = true; vp.classList.add("panning"); sx = e.clientX; sy = e.clientY; sl = vp.scrollLeft; st = vp.scrollTop; });' +
+      'window.addEventListener("mousemove", function(e) { if (!panning) return; vp.scrollLeft = sl - (e.clientX - sx); vp.scrollTop = st - (e.clientY - sy); });' +
+      'window.addEventListener("mouseup", function() { panning = false; vp.classList.remove("panning"); });' +
+      'fit();' +
+      '</scr' + 'ipt></body></html>';
+
+    var w = window.open('', '_blank', 'width=1200,height=800');
+    if (w) { w.document.write(html); w.document.close(); }
+  }
+
+  document.querySelectorAll('.mermaid-wrap').forEach(function(wrap) {
+    // Ctrl/Cmd + scroll to zoom
+    wrap.addEventListener('wheel', function(e) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      var current = parseFloat(wrap.dataset.zoom || INITIAL_ZOOM);
+      var factor = e.deltaY < 0 ? 1.1 : 0.9;
+      var next = Math.min(Math.max(current * factor, 0.5), 5);
+      wrap.dataset.zoom = next;
+      wrap.style.setProperty('--diagram-zoom', next);
+    }, { passive: false });
+
+    // Click-and-drag to pan
+    var startX, startY, scrollL, scrollT;
+    wrap.addEventListener('mousedown', function(e) {
+      if (e.target.closest('.zoom-controls')) return;
+      wrap.classList.add('is-panning');
+      startX = e.clientX;
+      startY = e.clientY;
+      scrollL = wrap.scrollLeft;
+      scrollT = wrap.scrollTop;
+    });
+    window.addEventListener('mousemove', function(e) {
+      if (!wrap.classList.contains('is-panning')) return;
+      wrap.scrollLeft = scrollL - (e.clientX - startX);
+      wrap.scrollTop = scrollT - (e.clientY - startY);
+    });
+    window.addEventListener('mouseup', function() {
+      wrap.classList.remove('is-panning');
+    });
+  });
+
+  // Scorecard pattern tooltips (fixed positioning to avoid overflow:hidden clipping)
+  (function() {
+    var tooltip = document.getElementById('svg-tooltip');
+    if (!tooltip) return;
+    document.querySelectorAll('.has-tooltip').forEach(function(cell) {
+      cell.addEventListener('mouseenter', function() {
+        var title = cell.getAttribute('data-tt-title') || '';
+        var desc = cell.getAttribute('data-tt-desc') || '';
+        var ref = cell.getAttribute('data-tt-ref') || '';
+        if (!title && !desc) return;
+        var html = '<strong>' + title + '</strong>' + desc;
+        if (ref) html += '<span class="tt-ref">' + ref + '</span>';
+        tooltip.innerHTML = html;
+        var rect = cell.getBoundingClientRect();
+        tooltip.style.left = (rect.left + rect.width / 2) + 'px';
+        tooltip.style.top = (rect.top - 8) + 'px';
+        tooltip.style.transform = 'translate(-50%, -100%)';
+        if (rect.top - 160 < 0) {
+          tooltip.style.top = (rect.bottom + 8) + 'px';
+          tooltip.style.transform = 'translate(-50%, 0)';
+        }
+        tooltip.classList.add('visible');
+      });
+      cell.addEventListener('mouseleave', function() {
+        tooltip.classList.remove('visible');
+      });
+    });
+  })();
+
+  // Attach SVG node tooltips after mermaid renders
+  setTimeout(function() {
+    var tooltip = document.getElementById('svg-tooltip');
+    if (!tooltip) return;
+
+    document.querySelectorAll('.mermaid-wrap[data-tooltips]').forEach(function(wrap) {
+      var metaId = wrap.getAttribute('data-tooltips');
+      var metaEl = document.getElementById(metaId);
+      if (!metaEl) return;
+
+      var data;
+      try { data = JSON.parse(metaEl.textContent); } catch(e) { return; }
+
+      var svg = wrap.querySelector('svg');
+      if (!svg) return;
+
+      svg.querySelectorAll('g.node').forEach(function(node) {
+        var rawId = node.id || '';
+        var match = rawId.match(/^flowchart-(.+?)-\d+$/);
+        if (!match) return;
+        var nodeId = match[1];
+        if (!data[nodeId]) return;
+
+        var info = data[nodeId];
+
+        node.addEventListener('mouseenter', function(e) {
+          var html = '<strong>' + info.title + '</strong>' + info.desc;
+          if (info.ref) html += '<span class="tt-ref">' + info.ref + '</span>';
+          tooltip.innerHTML = html;
+
+          var rect = node.getBoundingClientRect();
+          var tipX = rect.left + rect.width / 2;
+          var tipY = rect.top - 8;
+
+          tooltip.style.left = tipX + 'px';
+          tooltip.style.top = tipY + 'px';
+          tooltip.style.transform = 'translate(-50%, -100%)';
+
+          if (tipY - 120 < 0) {
+            tooltip.style.top = (rect.bottom + 8) + 'px';
+            tooltip.style.transform = 'translate(-50%, 0)';
+          }
+
+          tooltip.classList.add('visible');
+        });
+
+        node.addEventListener('mouseleave', function() {
+          tooltip.classList.remove('visible');
+        });
+      });
+    });
+  }, 2000);
+</script>
+
+</body>
+</html>
