@@ -22,7 +22,7 @@ from iconsult_mcp.tools.consultation_report import consultation_report
 # ---------------------------------------------------------------------------
 
 _TEMPLATE_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "templates",
 )
 _TEMPLATE_FILE = os.path.join(_TEMPLATE_DIR, "consultation-report-template.html")
