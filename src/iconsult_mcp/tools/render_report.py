@@ -384,6 +384,135 @@ def _render_tooltip_scripts(tooltips_current: dict, tooltips_target: dict) -> st
     return "\n".join(lines)
 
 
+def _match_node_to_pattern(
+    node_id: str,
+    title: str,
+    pattern_lookup: dict[str, dict],
+) -> dict | None:
+    """Best-effort fuzzy match of a tooltip node to a pattern assessment.
+
+    Returns the matched pattern dict or None.  Priority:
+    1. Exact node_id match against pattern_id
+    2. Title contains pattern_name (or vice versa)
+    3. >50% word overlap
+    """
+    # Normalize for comparison
+    nid = node_id.lower().replace(" ", "_").replace("-", "_")
+    title_lower = title.lower()
+    title_words = set(title_lower.split())
+
+    # 1. Exact ID match
+    if nid in pattern_lookup:
+        return pattern_lookup[nid]
+
+    # 2/3. Score all patterns by name similarity
+    best, best_score = None, 0.0
+    for _pid, pdata in pattern_lookup.items():
+        pname = pdata.get("pattern_name", "").lower()
+        pwords = set(pname.split())
+
+        # Containment checks (strong signal)
+        if pname and (pname in title_lower or title_lower in pname):
+            score = 0.9
+        elif pwords and title_words:
+            overlap = len(title_words & pwords)
+            union = len(title_words | pwords)
+            score = overlap / union if union else 0.0
+        else:
+            score = 0.0
+
+        if score > best_score:
+            best_score = score
+            best = pdata
+
+    return best if best_score > 0.4 else None
+
+
+# Max indicators shown in tooltip before "+N more"
+_MAX_TOOLTIP_INDICATORS = 4
+
+
+def _enrich_tooltips(
+    tooltips: dict,
+    categories: dict,
+    scenarios: list[dict],
+) -> dict:
+    """Auto-enrich tooltip entries with pattern status, indicators, and failure teasers.
+
+    Cross-references tooltip node IDs/titles against scored pattern data
+    and failure scenarios.  Unmatched nodes pass through unchanged.
+    """
+    if not tooltips:
+        return tooltips
+
+    # Build flat lookup: pattern_id → {pattern_name, status, indicator_summary, indicators_raw}
+    pattern_lookup: dict[str, dict] = {}
+    for _cat_key, cat in categories.items():
+        for _lv, lv_data in cat.get("levels", {}).items():
+            for p in lv_data.get("patterns", []):
+                pid = p["pattern_id"]
+                entry = {
+                    "pattern_id": pid,
+                    "pattern_name": p.get("pattern_name", ""),
+                    "status": p.get("status", "not_assessed"),
+                    "indicator_summary": p.get("indicator_summary"),
+                }
+                pattern_lookup[pid] = entry
+                # Also key by slugified name for fuzzy matching
+                slug = p.get("pattern_name", "").lower().replace(" ", "_").replace("-", "_")
+                if slug and slug not in pattern_lookup:
+                    pattern_lookup[slug] = entry
+
+    # Build scenario lookup: pattern_id → trigger text
+    scenario_lookup: dict[str, str] = {}
+    for s in scenarios:
+        mp = s.get("missing_pattern", {})
+        spid = mp.get("id", "")
+        if spid and "trigger" in s:
+            scenario_lookup[spid] = s["trigger"]
+
+    # Get raw indicator data from rubric for matched patterns
+    from iconsult_mcp.tools.rubric_data import get_pattern_indicators as _get_indicators
+    from iconsult_mcp.db import get_consultation
+
+    enriched = {}
+    for node_id, meta in tooltips.items():
+        meta = dict(meta)  # shallow copy
+        title = meta.get("title", node_id)
+
+        match = _match_node_to_pattern(node_id, title, pattern_lookup)
+        if match:
+            status = match["status"]
+            pid = match["pattern_id"]
+
+            # Only add status for assessed patterns
+            if status not in ("not_assessed",):
+                meta["status"] = status
+
+            # Indicators: fetch from rubric, cross-ref with summary
+            ind_summary = match.get("indicator_summary")
+            if ind_summary and status not in ("not_assessed", "not_applicable"):
+                rubric_inds = _get_indicators(pid)
+                if rubric_inds:
+                    # We only have summary counts, not per-indicator met/unmet
+                    # from score_data.  Build a display list from rubric text.
+                    # For implemented patterns with all met, skip indicators.
+                    if status == "implemented" and ind_summary.get("not_met", 0) == 0:
+                        pass  # All good — don't clutter
+                    else:
+                        meta["indicators"] = rubric_inds
+                        meta["indicators_met"] = ind_summary.get("met", 0)
+                        meta["indicators_total"] = ind_summary.get("met", 0) + ind_summary.get("not_met", 0)
+
+            # Failure teaser: only for missing/partial
+            if status in ("missing", "partial") and pid in scenario_lookup:
+                meta["failure_teaser"] = scenario_lookup[pid]
+
+        enriched[node_id] = meta
+
+    return enriched
+
+
 def _render_recommendations(
     roadmap: list[dict],
     recommendation_narratives: dict | None,
@@ -633,6 +762,10 @@ async def render_report(
     gap_pids = [g["pattern_id"] for phase in roadmap for g in phase.get("patterns", [])]
     concept_defs = _get_concept_definitions(gap_pids)
 
+    # Enrich tooltips with pattern status, indicators, failure teasers
+    enriched_current = _enrich_tooltips(tooltips_current, categories, scenarios)
+    enriched_target = _enrich_tooltips(tooltips_target, categories, scenarios)
+
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # -----------------------------------------------------------------------
@@ -659,7 +792,7 @@ async def render_report(
         "failure_chain": _render_failure_chain(failure_chain),
         "stress_test": _render_stress_test(scenarios),
         "footer": _render_footer(consultation_id, date),
-        "tooltip_scripts": _render_tooltip_scripts(tooltips_current, tooltips_target),
+        "tooltip_scripts": _render_tooltip_scripts(enriched_current, enriched_target),
     }
 
     # -----------------------------------------------------------------------

@@ -272,3 +272,97 @@ async def test_render_report_maturity_data(consultation_cleanup):
 
     assert "categories_rendered" in output
     assert output["categories_rendered"] > 0
+
+
+@pytest.mark.asyncio
+async def test_render_report_enriched_tooltips_have_status(consultation_cleanup):
+    """Enriched tooltips get status field when node matches an assessed pattern."""
+    result = await match_concepts(TEST_CASE["description"], max_results=5)
+    cid = consultation_cleanup(result["consultation_id"])
+
+    for pa in TEST_CASE["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output = await render_report(
+            consultation_id=cid,
+            output_dir=tmpdir,
+            **MOCK_NARRATIVES,
+        )
+
+        with open(output["path"], "r", encoding="utf-8") as f:
+            html_content = f.read()
+
+    # Extract target tooltip JSON (WD = Watchdog which maps to watchdog_timeout)
+    import re
+    blocks = re.findall(
+        r'<script type="application/json" id="tooltips-target">\s*(.*?)\s*</script>',
+        html_content, re.DOTALL,
+    )
+    assert len(blocks) == 1
+    target_data = json.loads(blocks[0])
+
+    # WD node title is "Watchdog" which should match watchdog_timeout (missing)
+    wd = target_data.get("WD", {})
+    assert wd.get("status") == "missing", f"Expected 'missing' status for Watchdog, got {wd.get('status')}"
+    # Missing pattern should have a failure teaser
+    assert "failure_teaser" in wd, "Missing pattern should have failure_teaser"
+
+    # MGR title is "Manager" — should match supervisor_architecture (implemented)
+    # Check it in current tooltips
+    blocks_cur = re.findall(
+        r'<script type="application/json" id="tooltips-current">\s*(.*?)\s*</script>',
+        html_content, re.DOTALL,
+    )
+    current_data = json.loads(blocks_cur[0])
+    mgr = current_data.get("MGR", {})
+    # Manager → Supervisor Architecture match may or may not happen depending on
+    # fuzzy matching. At minimum, original fields are preserved.
+    assert mgr.get("title") == "Manager"
+    assert mgr.get("desc") == "Central orchestrator for research pipeline."
+
+
+@pytest.mark.asyncio
+async def test_render_report_enriched_tooltips_no_match_passthrough(consultation_cleanup):
+    """Tooltip nodes that don't match any pattern keep original fields only."""
+    result = await match_concepts(TEST_CASE["description"], max_results=5)
+    cid = consultation_cleanup(result["consultation_id"])
+
+    for pa in TEST_CASE["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    # Use tooltips with a node that won't match any pattern
+    custom_tooltips = {
+        "tooltips_current": {
+            "XYZ": {"title": "Totally Unique Widget", "desc": "No match.", "ref": "n/a"},
+        },
+        "tooltips_target": {
+            "XYZ": {"title": "Totally Unique Widget", "desc": "No match.", "ref": "n/a"},
+        },
+    }
+    narratives = {**MOCK_NARRATIVES, **custom_tooltips}
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output = await render_report(
+            consultation_id=cid,
+            output_dir=tmpdir,
+            **narratives,
+        )
+
+        with open(output["path"], "r", encoding="utf-8") as f:
+            html_content = f.read()
+
+    import re
+    blocks = re.findall(
+        r'<script type="application/json" id="tooltips-current">\s*(.*?)\s*</script>',
+        html_content, re.DOTALL,
+    )
+    data = json.loads(blocks[0])
+    xyz = data.get("XYZ", {})
+
+    # Original fields preserved, no enrichment fields added
+    assert xyz.get("title") == "Totally Unique Widget"
+    assert xyz.get("desc") == "No match."
+    assert "status" not in xyz
+    assert "indicators" not in xyz
+    assert "failure_teaser" not in xyz

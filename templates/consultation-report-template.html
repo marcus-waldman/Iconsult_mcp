@@ -340,7 +340,18 @@ h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; }
   pointer-events: none; opacity: 0; transition: opacity 0.15s ease;
 }
 .svg-tooltip.visible { opacity: 1; }
-.svg-tooltip strong { color: var(--accent); display: block; margin-bottom: 6px; font-size: 14px; }
+.svg-tooltip { max-height: 340px; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 88%, transparent 100%); mask-image: linear-gradient(to bottom, black 88%, transparent 100%); }
+.svg-tooltip strong { color: var(--accent); display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 14px; }
+.svg-tooltip .tt-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.svg-tooltip .tt-status.st-implemented { background: var(--implemented); }
+.svg-tooltip .tt-status.st-partial { background: var(--partial, var(--amber)); }
+.svg-tooltip .tt-status.st-missing { background: var(--missing, var(--red)); }
+.svg-tooltip .tt-divider { border: none; border-top: 1px dotted var(--border-bright); margin: 8px 0 6px; }
+.svg-tooltip .tt-indicators { font-size: 11px; color: var(--text-muted); line-height: 1.7; }
+.svg-tooltip .tt-indicators .ind-met { color: var(--implemented); }
+.svg-tooltip .tt-indicators .ind-unmet { opacity: 0.5; }
+.svg-tooltip .tt-indicators .ind-more { font-style: italic; margin-top: 2px; }
+.svg-tooltip .tt-teaser { font-size: 11px; font-style: italic; color: var(--amber); margin-top: 6px; }
 .svg-tooltip .tt-ref { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; margin-top: 8px; display: block; }
 .mermaid svg g.node:hover rect,
 .mermaid svg g.node:hover circle,
@@ -604,6 +615,65 @@ footer a { color: var(--accent); text-decoration: none; }
 <script>
   var INITIAL_ZOOM = 1.2;
 
+  // Build enriched tooltip HTML from a tooltip info object.
+  // Fields: title, desc, ref (always), status?, indicators?, indicators_met?,
+  //         indicators_total?, failure_teaser? (auto-enriched).
+  function buildTooltipHTML(info) {
+    var h = '<strong>';
+    if (info.status) {
+      h += '<span class="tt-status st-' + info.status + '"></span>';
+    }
+    h += info.title + '</strong>';
+    h += info.desc;
+
+    // Indicator checklist
+    if (info.indicators && info.indicators.length > 0) {
+      var met = info.indicators_met || 0;
+      var total = info.indicators_total || info.indicators.length;
+      var maxShow = 4;
+      // Build display list: unmet first, then met, capped
+      var unmetList = [];
+      var metList = [];
+      for (var i = 0; i < info.indicators.length; i++) {
+        if (i < met) { metList.push(info.indicators[i]); }
+        else { unmetList.push(info.indicators[i]); }
+      }
+      // Reorder: unmet items first (they're actionable), then met
+      // But indicators array is rubric order — use met count to split
+      var ordered = [];
+      // Show unmet first (index >= met), then met (index < met)
+      for (var j = met; j < info.indicators.length && j < total; j++) {
+        ordered.push({text: info.indicators[j], isMet: false});
+      }
+      for (var k = 0; k < met && k < info.indicators.length; k++) {
+        ordered.push({text: info.indicators[k], isMet: true});
+      }
+
+      h += '<div class="tt-divider"></div><div class="tt-indicators">';
+      var shown = Math.min(ordered.length, maxShow);
+      for (var s = 0; s < shown; s++) {
+        var ind = ordered[s];
+        if (ind.isMet) {
+          h += '<div class="ind-met">\u2713 ' + ind.text + '</div>';
+        } else {
+          h += '<div class="ind-unmet">\u2717 ' + ind.text + '</div>';
+        }
+      }
+      if (ordered.length > maxShow) {
+        h += '<div class="ind-more">+' + (ordered.length - maxShow) + ' more</div>';
+      }
+      h += '</div>';
+    }
+
+    // Failure teaser
+    if (info.failure_teaser) {
+      h += '<div class="tt-teaser">\u26a0 ' + info.failure_teaser + '</div>';
+    }
+
+    if (info.ref) h += '<span class="tt-ref">' + info.ref + '</span>';
+    return h;
+  }
+
   // Zoom works by setting a CSS custom property on the .mermaid-wrap container.
   // The inner .mermaid / svg element uses transform: scale(var(--diagram-zoom)).
   // This avoids issues with CSS zoom not applying to SVG elements.
@@ -635,12 +705,23 @@ footer a { color: var(--accent); text-decoration: none; }
     svgClone.style.transform = 'none';
     svgClone.style.maxWidth = 'none';
 
+    // Grab tooltip data from the parent page if available
+    var tooltipData = null;
+    var metaId = wrap.getAttribute('data-tooltips');
+    if (metaId) {
+      var metaEl = document.getElementById(metaId);
+      if (metaEl) {
+        try { tooltipData = metaEl.textContent; } catch(e) {}
+      }
+    }
+
     var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     var bg = isDark ? '#0c0a09' : '#faf9f7';
     var text = isDark ? '#fafaf9' : '#1c1917';
     var textMuted = isDark ? '#78716c' : '#a8a29e';
     var border = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.07)';
     var surface = isDark ? '#1c1917' : '#ffffff';
+    var accent = isDark ? '#f59e0b' : '#d97706';
 
     var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
       '<title>' + titleText + '</title>' +
@@ -656,6 +737,21 @@ footer a { color: var(--accent); text-decoration: none; }
       '.viewport { position: absolute; top: 53px; left: 0; right: 0; bottom: 0; overflow: auto; cursor: grab; }' +
       '.viewport.panning { cursor: grabbing; user-select: none; }' +
       '.svg-container { transform-origin: 0 0; padding: 32px; display: inline-block; min-width: 100%; min-height: 100%; }' +
+      '.svg-tooltip { position: fixed; z-index: 1000; background: ' + surface + '; border: 1px solid ' + border + '; border-radius: 10px; padding: 14px 18px; max-width: 320px; max-height: 340px; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 88%, transparent 100%); mask-image: linear-gradient(to bottom, black 88%, transparent 100%); font-size: 13px; line-height: 1.5; pointer-events: none; opacity: 0; transition: opacity 0.15s; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }' +
+      '.svg-tooltip.visible { opacity: 1; }' +
+      '.svg-tooltip strong { color: ' + accent + '; display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 14px; }' +
+      '.svg-tooltip .tt-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }' +
+      '.svg-tooltip .tt-status.st-implemented { background: #0d9488; }' +
+      '.svg-tooltip .tt-status.st-partial { background: ' + accent + '; }' +
+      '.svg-tooltip .tt-status.st-missing { background: #ef4444; }' +
+      '.svg-tooltip .tt-divider { border: none; border-top: 1px dotted ' + border + '; margin: 8px 0 6px; }' +
+      '.svg-tooltip .tt-indicators { font-size: 11px; color: ' + textMuted + '; line-height: 1.7; }' +
+      '.svg-tooltip .tt-indicators .ind-met { color: #0d9488; }' +
+      '.svg-tooltip .tt-indicators .ind-unmet { opacity: 0.5; }' +
+      '.svg-tooltip .tt-indicators .ind-more { font-style: italic; margin-top: 2px; }' +
+      '.svg-tooltip .tt-teaser { font-size: 11px; font-style: italic; color: ' + accent + '; margin-top: 6px; }' +
+      '.svg-tooltip .tt-ref { color: ' + textMuted + '; font-family: "Fragment Mono", monospace; font-size: 11px; margin-top: 8px; display: block; }' +
+      'g.node { cursor: help; }' +
       '</style></head><body>' +
       '<div class="toolbar">' +
       '  <h1>' + titleText + '</h1>' +
@@ -667,6 +763,7 @@ footer a { color: var(--accent); text-decoration: none; }
       '<div class="viewport" id="vp">' +
       '  <div class="svg-container" id="sc">' + svgClone.outerHTML + '</div>' +
       '</div>' +
+      '<div class="svg-tooltip" id="svg-tooltip"></div>' +
       '<script>' +
       'var scale = 1, sc = document.getElementById("sc"), vp = document.getElementById("vp"), lbl = document.getElementById("zoom-label");' +
       'function apply() { sc.style.transform = "scale(" + scale + ")"; lbl.textContent = Math.round(scale * 100) + "%"; }' +
@@ -684,6 +781,60 @@ footer a { color: var(--accent); text-decoration: none; }
       'window.addEventListener("mousemove", function(e) { if (!panning) return; vp.scrollLeft = sl - (e.clientX - sx); vp.scrollTop = st - (e.clientY - sy); });' +
       'window.addEventListener("mouseup", function() { panning = false; vp.classList.remove("panning"); });' +
       'fit();' +
+      (tooltipData ? (
+      'var tooltipData = ' + tooltipData + ';' +
+      'function buildTooltipHTML(info) {' +
+      '  var h = "<strong>";' +
+      '  if (info.status) h += "<span class=\\"tt-status st-" + info.status + "\\"></span>";' +
+      '  h += info.title + "</strong>" + info.desc;' +
+      '  if (info.indicators && info.indicators.length > 0) {' +
+      '    var met = info.indicators_met || 0;' +
+      '    var total = info.indicators_total || info.indicators.length;' +
+      '    var ordered = [];' +
+      '    for (var j = met; j < info.indicators.length && j < total; j++) ordered.push({text: info.indicators[j], isMet: false});' +
+      '    for (var k = 0; k < met && k < info.indicators.length; k++) ordered.push({text: info.indicators[k], isMet: true});' +
+      '    h += "<div class=\\"tt-divider\\"></div><div class=\\"tt-indicators\\">";' +
+      '    var maxShow = 4;' +
+      '    for (var s = 0; s < Math.min(ordered.length, maxShow); s++) {' +
+      '      h += ordered[s].isMet ? "<div class=\\"ind-met\\">\\u2713 " + ordered[s].text + "</div>" : "<div class=\\"ind-unmet\\">\\u2717 " + ordered[s].text + "</div>";' +
+      '    }' +
+      '    if (ordered.length > maxShow) h += "<div class=\\"ind-more\\">+" + (ordered.length - maxShow) + " more</div>";' +
+      '    h += "</div>";' +
+      '  }' +
+      '  if (info.failure_teaser) h += "<div class=\\"tt-teaser\\">\\u26a0 " + info.failure_teaser + "</div>";' +
+      '  if (info.ref) h += "<span class=\\"tt-ref\\">" + info.ref + "</span>";' +
+      '  return h;' +
+      '}' +
+      'var tooltip = document.getElementById("svg-tooltip");' +
+      'var svgEl = sc.querySelector("svg");' +
+      'if (svgEl && tooltip) {' +
+      '  svgEl.querySelectorAll("g.node").forEach(function(node) {' +
+      '    var rawId = node.id || "";' +
+      '    var match = rawId.match(/^flowchart-(.+?)-\\d+$/);' +
+      '    if (!match) return;' +
+      '    var nodeId = match[1];' +
+      '    if (!tooltipData[nodeId]) return;' +
+      '    var info = tooltipData[nodeId];' +
+      '    node.addEventListener("mouseenter", function(e) {' +
+      '      tooltip.innerHTML = buildTooltipHTML(info);' +
+      '      var rect = node.getBoundingClientRect();' +
+      '      var tipX = rect.left + rect.width / 2;' +
+      '      var tipY = rect.top - 8;' +
+      '      tooltip.style.left = tipX + "px";' +
+      '      tooltip.style.top = tipY + "px";' +
+      '      tooltip.style.transform = "translate(-50%, -100%)";' +
+      '      if (tipY - 120 < 0) {' +
+      '        tooltip.style.top = (rect.bottom + 8) + "px";' +
+      '        tooltip.style.transform = "translate(-50%, 0)";' +
+      '      }' +
+      '      tooltip.classList.add("visible");' +
+      '    });' +
+      '    node.addEventListener("mouseleave", function() {' +
+      '      tooltip.classList.remove("visible");' +
+      '    });' +
+      '  });' +
+      '}'
+      ) : '') +
       '</scr' + 'ipt></body></html>';
 
     var w = window.open('', '_blank', 'width=1200,height=800');
@@ -777,9 +928,7 @@ footer a { color: var(--accent); text-decoration: none; }
         var info = data[nodeId];
 
         node.addEventListener('mouseenter', function(e) {
-          var html = '<strong>' + info.title + '</strong>' + info.desc;
-          if (info.ref) html += '<span class="tt-ref">' + info.ref + '</span>';
-          tooltip.innerHTML = html;
+          tooltip.innerHTML = buildTooltipHTML(info);
 
           var rect = node.getBoundingClientRect();
           var tipX = rect.left + rect.width / 2;
