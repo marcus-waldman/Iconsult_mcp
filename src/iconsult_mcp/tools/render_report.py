@@ -10,6 +10,7 @@ import html
 import json
 import os
 from datetime import datetime, timezone
+from importlib.resources import files
 
 from iconsult_mcp.db import get_connection
 from iconsult_mcp.tools.score_architecture import score_architecture
@@ -21,11 +22,7 @@ from iconsult_mcp.tools.consultation_report import consultation_report
 # Template loading
 # ---------------------------------------------------------------------------
 
-_TEMPLATE_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "templates",
-)
-_TEMPLATE_FILE = os.path.join(_TEMPLATE_DIR, "consultation-report-template.html")
+_TEMPLATE_REF = files("iconsult_mcp").joinpath("templates/consultation-report-template.html")
 
 # Agent color presets — maps a color name to (bg CSS var, text CSS var)
 _AGENT_COLORS: dict[str, tuple[str, str]] = {
@@ -771,11 +768,10 @@ async def render_report(
     # -----------------------------------------------------------------------
     # 3. Load template
     # -----------------------------------------------------------------------
-    if not os.path.exists(_TEMPLATE_FILE):
-        return {"error": f"Template not found: {_TEMPLATE_FILE}"}
-
-    with open(_TEMPLATE_FILE, "r", encoding="utf-8") as f:
-        template = f.read()
+    try:
+        template = _TEMPLATE_REF.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {"error": f"Template not found: {_TEMPLATE_REF}"}
 
     # -----------------------------------------------------------------------
     # 4. Build slot content
