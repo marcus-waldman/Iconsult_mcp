@@ -8,7 +8,7 @@ Iconsult is an MCP server that reviews your multi-agent architecture against a k
 
 We pointed Iconsult at OpenAI's [Financial Research Agent](https://github.com/openai/openai-agents-python/tree/main/examples/financial_research_agent) — a 5-stage multi-agent pipeline from their Agents SDK — and asked it to assess architectural maturity.
 
-[![Watch the demo](https://img.youtube.com/vi/GWzlYf5MsHM/maxresdefault.jpg)](https://www.youtube.com/watch?v=GWzlYf5MsHM)
+[![Watch the demo](https://img.youtube.com/vi/X96XEaWfoCE/maxresdefault.jpg)](https://www.youtube.com/watch?v=X96XEaWfoCE)
 
 **[View the full interactive architecture review →](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html)**
 
@@ -18,53 +18,74 @@ The Financial Research Agent uses a **5-stage sequential pipeline** orchestrated
 
 ```mermaid
 flowchart TD
-    Q["User Query"] --> MGR["FinancialResearchManager"]
-    MGR --> PLAN["PlannerAgent (o3-mini)"]
-    PLAN -->|"FinancialSearchPlan"| FAN{"Fan-out N searches"}
-    FAN --> S1["SearchAgent"]
-    FAN --> S2["SearchAgent"]
-    FAN --> SN["SearchAgent"]
-    S1 --> W["WriterAgent (gpt-5.2)"]
-    S2 --> W
-    SN --> W
-    W -.-> FA["FundamentalsAgent (.as_tool)"]
-    W -.-> RA["RiskAgent (.as_tool)"]
-    W --> V["VerifierAgent"]
-    V --> OUT["Output"]
+    User(["User Query"]) --> Manager["FinancialResearchManager"]
+    Manager --> Planner["PlannerAgent\no3-mini"]
+    Planner -->|"FinancialSearchPlan"| FanOut{"Parallel Fan-Out"}
+    FanOut --> S1["SearchAgent 1"]
+    FanOut --> S2["SearchAgent 2"]
+    FanOut --> SN["SearchAgent N"]
+    S1 --> Collect["Collect Results"]
+    S2 --> Collect
+    SN --> Collect
+    Collect --> Writer["WriterAgent\ngpt-5.4"]
+    Writer -.->|"as_tool"| Fundamentals["FundamentalsAnalystAgent"]
+    Writer -.->|"as_tool"| Risk["RiskAnalystAgent"]
+    Fundamentals -.-> Writer
+    Risk -.-> Writer
+    Writer -->|"FinancialReportData"| Verifier["VerifierAgent\ngpt-5.4"]
+    Verifier --> Output(["Print Report"])
 ```
 
 ### What Iconsult found
 
-Solid foundation — and Iconsult's knowledge graph traversal identified 4 key opportunities for growth:
+Solid foundation — and Iconsult's knowledge graph traversal identified key opportunities across 7 categories:
 
-| # | Finding | Recommended Pattern | Book Reference |
-|---|-----|----------------|----------------|
-| R1 | Verifier flags issues but pipeline terminates — no self-correction | Auto-Healing Agent Resuscitation | Ch. 7, p. 216 |
-| R2 | Raw search results pass unfiltered to writer | Hybrid Planner+Scorer | Ch. 12, pp. 387-390 |
-| R3 | All agents share same trust level — no capability boundaries | Supervision Tree with Guarded Capabilities | Ch. 5, pp. 142-145 |
-| R4 | Zero reliability patterns composed (book recommends 2-3 minimum) | Shared Epistemic Memory + Persistent Instruction Anchoring | Ch. 6, p. 203 |
+| Category | Status | Key Opportunities |
+|----------|--------|-------------------|
+| Coordination | Established | Already strong — Orchestrator, Planner-Worker, Agent Delegation all in place |
+| Explainability | Not Started | Basic Audit Logging, Instruction Fidelity Auditing, Causal Dependency Graph |
+| Robustness | Not Started | Watchdog Timeout, Retry + Prompt Mutation, Incremental Checkpointing, Fallback Model |
+| Human-Agent Interaction | Not Started | Human Calls Agent, Agent Calls Human, Agent Calls Proxy Agent |
+| Agent Capabilities | Not Started | Custom Evaluation Metrics, Hybrid Planner+Scorer, Shared Epistemic Memory |
+| Infrastructure | Not Started | Agent Auth & Registry, Event-Driven Reactivity |
+| Continuous Improvement | Not Started | Preference-Controlled Synthetic Data, Advanced RAG |
 
 ### Recommended architecture
 
-The natural next evolution — adding a feedback loop, quality gate, shared memory, and retry logic:
+The natural next evolution — adding retry logic, checkpointing, shared memory, and a verification feedback loop:
 
 ```mermaid
 flowchart TD
-    Q["User Query"] --> SUP["SupervisorManager"]
-    SUP --> MEM[("Shared Epistemic Memory")]
-    SUP --> PLAN["PlannerAgent"]
-    PLAN --> FAN{"Fan-out + Retry Logic"}
-    FAN --> S1["SearchAgent"]
-    FAN --> S2["SearchAgent"]
-    S1 & S2 --> SCR["ScorerAgent (quality gate)"]
-    SCR --> W["WriterAgent"]
-    W -.-> FA["FundamentalsAgent"]
-    W -.-> RA["RiskAgent"]
-    W --> V["VerifierAgent"]
-    V -->|"issues found"| W
-    V -->|"verified"| OUT["Output"]
-    MEM -.-> W
-    MEM -.-> V
+    User(["User Query"]) --> Manager["FinancialResearchManager"]
+    Manager --> Planner["PlannerAgent\no3-mini"]
+    Planner -->|"FinancialSearchPlan"| FanOut{"Parallel Fan-Out"}
+    FanOut --> S1["SearchAgent 1"]
+    FanOut --> S2["SearchAgent 2"]
+    FanOut --> SN["SearchAgent N"]
+    S1 --> Collect["Collect Results"]
+    S2 --> Collect
+    SN --> Collect
+
+    FanOut -.-> WD["Watchdog Timeout\nSupervisor"]:::opportunity
+    S1 -.-> RT["Adaptive Retry\n+ Prompt Mutation"]:::opportunity
+    S2 -.-> RT
+    SN -.-> RT
+
+    Collect --> CP1["Checkpoint\nSearch Results"]:::opportunity
+    CP1 --> SharedMem[("Shared Epistemic\nMemory")]:::newpattern
+    SharedMem --> Writer["WriterAgent\ngpt-5.4"]
+    Writer -.->|"as_tool"| Fundamentals["FundamentalsAnalystAgent"]
+    Writer -.->|"as_tool"| Risk["RiskAnalystAgent"]
+    Fundamentals -.-> Writer
+    Risk -.-> Writer
+
+    Writer -->|"FinancialReportData"| Verifier["VerifierAgent\ngpt-5.4\n+ Scoring Rubric"]:::newpattern
+    Verifier -->|"Pass"| Output(["Print Report"])
+    Verifier -->|"Fail + Feedback"| Writer
+    Verifier -.-> Metrics["Custom Evaluation\nMetrics"]:::opportunity
+
+    classDef opportunity fill:none,stroke:#E74C3C,stroke-dasharray:5 5,color:#E74C3C
+    classDef newpattern fill:#27AE60,stroke:#333,color:white
 ```
 
 ### How it got there
@@ -85,7 +106,7 @@ The consultation followed Iconsult's guided workflow:
 
 ## What It Does
 
-Point it at a codebase (or describe your architecture), and it runs a structured consultation: matching concepts, traversing the knowledge graph for prerequisites and conflicts, scoring maturity against a 6-level model, and generating an interactive HTML review with before/after architecture diagrams.
+Point it at a codebase (or describe your architecture), and it runs a structured consultation: matching concepts, traversing the knowledge graph for prerequisites and conflicts, scoring maturity against a category-based rubric (7 categories × 3 levels from Ch. 12), and generating an interactive HTML review with before/after architecture diagrams.
 
 ### Tools (25)
 
@@ -99,7 +120,7 @@ Point it at a codebase (or describe your architecture), and it runs a structured
 | `log_pattern_assessment` | Assessment | Records whether each pattern is implemented, partial, missing, or not applicable |
 | `ask_book` | Deep context | RAG search against the book — returns passages with chapter, page numbers, and full text |
 | `consultation_report` | Coverage | Computes concept/relationship coverage, identifies opportunities, optionally diffs two sessions |
-| `score_architecture` | Scoring | Deterministic maturity scorecard (L1–L6) from logged pattern assessments; pattern ID aliases bridge KG ↔ maturity model IDs |
+| `score_architecture` | Scoring | Category-based maturity scorecard (7 categories × 3 levels) from logged pattern assessments; pattern ID aliases bridge KG ↔ rubric IDs |
 | `generate_failure_scenarios` | Resilience analysis | Resilience scenarios for each opportunity — code-grounded or book-grounded, with Ch. 7 recovery chain mapping |
 | `critique_consultation` | Quality | Structural critique with actionable fix suggestions; multi-iteration mode (1-3 passes) with convergence detection |
 | `render_report` | Report rendering | Server-side HTML rendering — pulls scores/scenarios/coverage from DB, merges with narrative content, writes complete HTML with CSS/JS/zoom/tooltips |
