@@ -340,7 +340,18 @@ h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 12px; }
   pointer-events: none; opacity: 0; transition: opacity 0.15s ease;
 }
 .svg-tooltip.visible { opacity: 1; }
-.svg-tooltip strong { color: var(--accent); display: block; margin-bottom: 6px; font-size: 14px; }
+.svg-tooltip { max-height: 340px; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 88%, transparent 100%); mask-image: linear-gradient(to bottom, black 88%, transparent 100%); }
+.svg-tooltip strong { color: var(--accent); display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 14px; }
+.svg-tooltip .tt-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.svg-tooltip .tt-status.st-implemented { background: var(--implemented); }
+.svg-tooltip .tt-status.st-partial { background: var(--partial, var(--amber)); }
+.svg-tooltip .tt-status.st-missing { background: var(--missing, var(--red)); }
+.svg-tooltip .tt-divider { border: none; border-top: 1px dotted var(--border-bright); margin: 8px 0 6px; }
+.svg-tooltip .tt-indicators { font-size: 11px; color: var(--text-muted); line-height: 1.7; }
+.svg-tooltip .tt-indicators .ind-met { color: var(--implemented); }
+.svg-tooltip .tt-indicators .ind-unmet { opacity: 0.5; }
+.svg-tooltip .tt-indicators .ind-more { font-style: italic; margin-top: 2px; }
+.svg-tooltip .tt-teaser { font-size: 11px; font-style: italic; color: var(--amber); margin-top: 6px; }
 .svg-tooltip .tt-ref { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; margin-top: 8px; display: block; }
 .mermaid svg g.node:hover rect,
 .mermaid svg g.node:hover circle,
@@ -497,70 +508,70 @@ footer a { color: var(--accent); text-decoration: none; }
 <section class="hero" id="brief">
   <div class="hero-badge ani">iConsult Architecture Review</div>
   <h1 class="ani">Financial Research Agent — Architecture Consultation</h1>
-  <p class="subtitle ani">Based on <em>Agentic Architectural Patterns for Building Multi-Agent Systems</em> (Arsanjani &amp; Bustos, Packt 2026). Consultation date: 2026-03-23.</p>
+  <p class="subtitle ani">Based on <em>Agentic Architectural Patterns for Building Multi-Agent Systems</em> (Arsanjani &amp; Bustos, Packt 2026). Consultation date: 2026-03-24.</p>
 </section>
 
 <!-- EXECUTIVE BRIEF -->
 <div class="exec-brief ani" id="exec-brief">
   <strong>Executive Brief</strong><br>
-  The Financial Research Agent demonstrates strong architectural foundations: a clean orchestrator pattern with 6 well-defined specialist agents, parallel search fan-out, structured Pydantic outputs, and an elegant agent-as-tool composition pattern. The most impactful opportunity is closing the resilience gap — the system currently has 0% coverage of Ch. 7&#x27;s failure recovery chain, with no timeouts, retries, or checkpointing. Adding Watchdog Timeout and Simple Retry to the manager would be a high-value quick win. The second priority is activating the verification loop: the verifier agent already audits reports but its output is never fed back to the writer for revision, leaving a self-correction opportunity on the table.
+  This multi-agent financial research pipeline demonstrates strong architectural foundations: a clean supervisor pattern, effective agent-as-tool delegation, parallel fan-out for search, and structured Pydantic outputs. The most impactful opportunity is closing the verification feedback loop — the VerifierAgent audits but cannot trigger rewrites, leaving the Self-Correction pattern unrealized. Adding retry logic with watchdog timeouts to the search fan-out (currently at 0% failure chain coverage) and introducing shared epistemic memory for cross-agent context would elevate this system from a well-structured L2 pipeline to a resilient, self-correcting L4 architecture.
 </div>
 
 <!-- SYSTEM UNDER REVIEW -->
 <section id="system">
 <h2 class="ani">System Under Review</h2>
-<p class="subtitle">Multi-agent financial analysis pipeline from OpenAI Agents SDK examples</p>
+<p class="subtitle">OpenAI Agents SDK Multi-Agent Pipeline</p>
 <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
   <div class="rec-card ani">
     <h4>Architecture</h4>
-    <p>Sequential pipeline orchestration: Planner → Search (parallel fan-out) → Writer (with analyst sub-agent tools) → Verifier. Manager class coordinates all 6 agents through async/await.</p>
+    <p>Centralized Supervisor with sequential pipeline: Plan → Search (parallel fan-out) → Write (with sub-agent tools) → Verify</p>
   </div>
   <div class="rec-card ani">
     <h4>Tech Stack</h4>
-    <p>Python, OpenAI Agents SDK, Pydantic BaseModel structured outputs, asyncio for parallel search, Rich console for live status updates, OpenAI tracing/spans</p>
+    <p>Python, OpenAI Agents SDK, asyncio, Pydantic, Rich (console UI), GPT-5.4 / o3-mini</p>
   </div>
   <div class="rec-card ani">
     <h4>Coordination</h4>
-    <p>Centralized orchestrator (FinancialResearchManager) with hardcoded sequential pipeline. Data flows through function arguments — no shared state. Agent-as-tool pattern wraps specialist analysts.</p>
+    <p>FinancialResearchManager orchestrator with Runner.run() invocations, asyncio.create_task for parallel search, agent.as_tool() for sub-analyst delegation</p>
   </div>
   <div class="rec-card ani">
     <h4>Security</h4>
-    <p>No explicit auth/authz. Agents use API keys from environment. No input validation on user queries beyond what the LLM provides.</p>
+    <p>No explicit security controls — no auth, no input validation, no rate limiting</p>
   </div>
 </div>
 <h3 style="margin-top: 32px;" class="ani">Agent Roster</h3>
 <div class="roster-grid">
   <div class="roster-card ani">
     <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">📋</span> PlannerAgent</h4>
-    <p>Generates 5-15 search terms from user query using o3-mini. Produces FinancialSearchPlan with reason + query per item.</p>
+    <p>Decomposes user queries into 5-15 financial search terms with reasoning</p>
     <div class="roster-tools">
-      <span class="tool-tag">None (LLM-only)</span>
+      <span class="tool-tag">Pydantic structured output (FinancialSearchPlan)</span>
     </div>
   </div>
   <div class="roster-card ani">
     <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">🔍</span> SearchAgent</h4>
-    <p>Executes web searches for each planned term. Returns 300-word summaries focused on key numbers, events, and quotes.</p>
+    <p>Executes web searches and produces 300-word financial summaries</p>
     <div class="roster-tools">
       <span class="tool-tag">WebSearchTool</span>
     </div>
   </div>
   <div class="roster-card ani">
-    <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">📊</span> FundamentalsAnalyst</h4>
-    <p>Analyzes company fundamentals — revenue, profit, margins, growth. Exposed as tool to WriterAgent via as_tool().</p>
+    <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">📊</span> FundamentalsAnalystAgent</h4>
+    <p>Analyzes company financials: revenue, margins, growth trajectory</p>
     <div class="roster-tools">
-      <span class="tool-tag">None (LLM-only)</span>
+      <span class="tool-tag">Exposed as tool via as_tool()</span>
     </div>
   </div>
   <div class="roster-card ani">
-    <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">⚠️</span> RiskAnalyst</h4>
-    <p>Identifies red flags — competitive threats, regulatory issues, supply chain problems. Exposed as tool to WriterAgent.</p>
+    <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">⚠️</span> RiskAnalystAgent</h4>
+    <p>Identifies risk factors: competitive threats, regulatory issues, supply chain</p>
     <div class="roster-tools">
-      <span class="tool-tag">None (LLM-only)</span>
+      <span class="tool-tag">Exposed as tool via as_tool()</span>
     </div>
   </div>
   <div class="roster-card ani">
     <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">✍️</span> WriterAgent</h4>
-    <p>Senior analyst synthesizing search results + specialist analyses into markdown report with executive summary and follow-up questions.</p>
+    <p>Synthesizes search results + analyst outputs into markdown report with executive summary</p>
     <div class="roster-tools">
       <span class="tool-tag">fundamentals_analysis</span>
       <span class="tool-tag">risk_analysis</span>
@@ -568,9 +579,9 @@ footer a { color: var(--accent); text-decoration: none; }
   </div>
   <div class="roster-card ani">
     <h4><span class="roster-icon" style="background:var(--accent-dim);color:var(--accent);">✅</span> VerifierAgent</h4>
-    <p>Audits report for internal consistency, sourcing, and unsupported claims. Returns verified boolean + issues.</p>
+    <p>Audits report for internal consistency, sourcing, and unsupported claims</p>
     <div class="roster-tools">
-      <span class="tool-tag">None (LLM-only)</span>
+      <span class="tool-tag">Pydantic structured output (VerificationResult)</span>
     </div>
   </div>
 </div>
@@ -581,10 +592,10 @@ footer a { color: var(--accent); text-decoration: none; }
 <h2 class="ani">Maturity Assessment</h2>
 <div class="maturity-banner ani">
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;width:100%;">
-    <div class="rating-emerging" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
-      <div style="font-size:1.5rem;line-height:1;">&#x25B2;</div>
+    <div class="rating-established" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
+      <div style="font-size:1.5rem;line-height:1;">&#x2713;</div>
       <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">Coordination &amp; Planning</div>
-      <div class="status-badge rating-emerging" style="margin-top:6px;">Emerging</div>
+      <div class="status-badge rating-established" style="margin-top:6px;">Established</div>
     </div>
     <div class="rating-not-started" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
       <div style="font-size:1.5rem;line-height:1;">&#x2014;</div>
@@ -596,10 +607,10 @@ footer a { color: var(--accent); text-decoration: none; }
       <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">Robustness &amp; Fault Tolerance</div>
       <div class="status-badge rating-not-started" style="margin-top:6px;">Not Started</div>
     </div>
-    <div class="rating-established" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
-      <div style="font-size:1.5rem;line-height:1;">&#x2713;</div>
+    <div class="rating-emerging" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
+      <div style="font-size:1.5rem;line-height:1;">&#x25B2;</div>
       <div style="font-weight:700;font-size:0.85rem;margin-top:6px;">Human-Agent Interaction</div>
-      <div class="status-badge rating-established" style="margin-top:6px;">Established</div>
+      <div class="status-badge rating-emerging" style="margin-top:6px;">Emerging</div>
     </div>
     <div class="rating-emerging" style="text-align:center;padding:14px 10px;border-radius:10px;border:1px solid var(--border);">
       <div style="font-size:1.5rem;line-height:1;">&#x25B2;</div>
@@ -627,7 +638,7 @@ footer a { color: var(--accent); text-decoration: none; }
 <div class="cat-scorecard ani">
   <div class="cat-scorecard-header">
     <h3>Coordination &amp; Planning</h3>
-    <span class="status-badge rating-emerging">&#x25B2; Emerging</span>
+    <span class="status-badge rating-established">&#x2713; Established</span>
   </div>
   <div class="cat-scorecard-body">
   <table class="scorecard-table">
@@ -638,14 +649,14 @@ footer a { color: var(--accent); text-decoration: none; }
   </tr></thead>
   <tbody>
   <tr>
-    <td class="has-tooltip" data-tt-title="Supervisor Architecture" data-tt-desc="manager.py: Manager supervises agent execution but lacks error handling, checkpointing, and escalation paths. Silent failure swallowing in _search()." data-tt-ref="Ch. 5"><strong>Supervisor Architecture</strong></td>
+    <td class="has-tooltip" data-tt-title="Supervisor Architecture" data-tt-desc="FinancialResearchManager (manager.py) acts as a centralized supervisor orchestrating plan→search→write→verify pipeline. Directly invokes each agent via Runner.run()." data-tt-ref="Ch. 5"><strong>Supervisor Architecture</strong></td>
     <td class="level-cell">Basic</td>
-    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Supervisor Architecture: Partial" data-tt-desc="manager.py: Manager supervises agent execution but lacks error handling, checkpointing, and escalation paths. Silent failure swallowing in _search()." data-tt-ref="Ch. 5">Partial</span></td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Supervisor Architecture: Implemented" data-tt-desc="FinancialResearchManager (manager.py) acts as a centralized supervisor orchestrating plan→search→write→verify pipeline. Directly invokes each agent via Runner.run()." data-tt-ref="Ch. 5">Implemented</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Multi-Agent Planning" data-tt-desc="planner_agent.py: Dedicated planning agent generates FinancialSearchPlan with 5-15 search items. Manager uses plan to drive downstream search tasks." data-tt-ref="Ch. 5"><strong>Multi-Agent Planning</strong></td>
+    <td class="has-tooltip" data-tt-title="Multi-Agent Planning" data-tt-desc="PlannerAgent (planner_agent.py) decomposes user queries into 5-15 FinancialSearchItem objects with query+reason fields. Pydantic-typed FinancialSearchPlan output." data-tt-ref="Ch. 5"><strong>Multi-Agent Planning</strong></td>
     <td class="level-cell">Basic</td>
-    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Multi-Agent Planning: Implemented" data-tt-desc="planner_agent.py: Dedicated planning agent generates FinancialSearchPlan with 5-15 search items. Manager uses plan to drive downstream search tasks." data-tt-ref="Ch. 5">Implemented</span></td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Multi-Agent Planning: Implemented" data-tt-desc="PlannerAgent (planner_agent.py) decomposes user queries into 5-15 FinancialSearchItem objects with query+reason fields. Pydantic-typed FinancialSearchPlan output." data-tt-ref="Ch. 5">Implemented</span></td>
   </tr>
   <tr>
     <td class="has-tooltip" data-tt-title="Hybrid Delegation Framework" data-tt-desc="A market-based agent composition topology implementing a Contract-Net Protocol where a solicitor broadcasts task announcements to bidder agents, who respond with formal bids containing capability, cost, ETA, and confidence scores; the solicitor then awards the task to the agent with the highest utility score for dynamic, runtime task assignment." data-tt-ref="Ch. 5"><strong>Hybrid Delegation Framework</strong></td>
@@ -653,9 +664,9 @@ footer a { color: var(--accent); text-decoration: none; }
     <td><span class="status-badge status-na has-tooltip" data-tt-title="Hybrid Delegation Framework: Not Assessed" data-tt-desc="A market-based agent composition topology implementing a Contract-Net Protocol where a solicitor broadcasts task announcements to bidder agents, who respond with formal bids containing capability, cost, ETA, and confidence scores; the solicitor then awards the task to the agent with the highest utility score for dynamic, runtime task assignment." data-tt-ref="Ch. 5">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Shared Epistemic Memory" data-tt-desc="Introduce a shared context dict that accumulates findings across agents. The risk analyst and financials analyst currently operate in isolation — if both discover the same earnings miss, they duplicate work. A shared blackboard would let them build on each other&#x27;s findings." data-tt-ref="Ch. 5"><strong>Shared Epistemic Memory</strong></td>
+    <td class="has-tooltip" data-tt-title="Shared Epistemic Memory" data-tt-desc="Replace the flat string concatenation in manager.py:126 with a typed SharedMemory class backed by Redis or in-memory dict. Expose via typed tools like get_search_results(topic) rather than passing raw strings. Add TTL timestamps so agents can assess data freshness. (Ch.6 p.197-203)" data-tt-ref="Ch. 5"><strong>Shared Epistemic Memory</strong></td>
     <td class="level-cell">Intermediate</td>
-    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Shared Epistemic Memory: Missing" data-tt-desc="Introduce a shared context dict that accumulates findings across agents. The risk analyst and financials analyst currently operate in isolation — if both discover the same earnings miss, they duplicate work. A shared blackboard would let them build on each other&#x27;s findings." data-tt-ref="Ch. 5">Missing</span></td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Shared Epistemic Memory: Missing" data-tt-desc="Replace the flat string concatenation in manager.py:126 with a typed SharedMemory class backed by Redis or in-memory dict. Expose via typed tools like get_search_results(topic) rather than passing raw strings. Add TTL timestamps so agents can assess data freshness. (Ch.6 p.197-203)" data-tt-ref="Ch. 5">Missing</span></td>
   </tr>
   <tr>
     <td class="has-tooltip" data-tt-title="Consensus, Negotiation &amp; Conflict Resolution" data-tt-desc="A pattern where agents with conflicting data engage in iterative debate to converge on a shared understanding in advanced multi-agent systems." data-tt-ref="Ch. 5"><strong>Consensus, Negotiation &amp; Conflict Resolution</strong></td>
@@ -679,19 +690,19 @@ footer a { color: var(--accent); text-decoration: none; }
   </tr></thead>
   <tbody>
   <tr>
-    <td class="has-tooltip" data-tt-title="Basic Audit Logging" data-tt-desc="Add Python logging (logging.getLogger) to manager.py. Log agent invocations with input/output summaries, latency, and any errors. The OpenAI trace integration provides external observability but no local audit trail for debugging." data-tt-ref="Ch. 6"><strong>Basic Audit Logging</strong></td>
+    <td class="has-tooltip" data-tt-title="Basic Audit Logging" data-tt-desc="" data-tt-ref="Ch. 6"><strong>Basic Audit Logging</strong></td>
     <td class="level-cell">Basic</td>
-    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Basic Audit Logging: Partial" data-tt-desc="Add Python logging (logging.getLogger) to manager.py. Log agent invocations with input/output summaries, latency, and any errors. The OpenAI trace integration provides external observability but no local audit trail for debugging." data-tt-ref="Ch. 6">Partial</span></td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Basic Audit Logging: Not Assessed" data-tt-desc="" data-tt-ref="Ch. 6">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Instruction Fidelity Auditing" data-tt-desc="verifier_agent.py: Audits report for consistency and sourcing. But does not verify that agent instructions were followed — only checks final output quality." data-tt-ref="Ch. 6"><strong>Instruction Fidelity Auditing</strong></td>
+    <td class="has-tooltip" data-tt-title="Instruction Fidelity Auditing" data-tt-desc="No mechanism to verify agents follow their instructions. Writer could ignore analyst tools or produce reports not matching the prompt structure." data-tt-ref="Ch. 6"><strong>Instruction Fidelity Auditing</strong></td>
     <td class="level-cell">Intermediate</td>
-    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Instruction Fidelity Auditing: Partial" data-tt-desc="verifier_agent.py: Audits report for consistency and sourcing. But does not verify that agent instructions were followed — only checks final output quality." data-tt-ref="Ch. 6">Partial</span></td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Instruction Fidelity Auditing: Missing" data-tt-desc="No mechanism to verify agents follow their instructions. Writer could ignore analyst tools or produce reports not matching the prompt structure." data-tt-ref="Ch. 6">Missing</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Persistent Instruction Anchoring" data-tt-desc="A pattern that uses semantically significant tags (e.g., &lt;CRITICAL_INSTRUCTION&gt;, [GOAL]) to embed high-priority goals or constraints within agent prompts, ensuring critical instructions remain salient as they are passed down hierarchical agent chains and are not lost to the LLM&#x27;s &#x27;lost in the middle&#x27; problem." data-tt-ref="Ch. 6"><strong>Persistent Instruction Anchoring</strong></td>
+    <td class="has-tooltip" data-tt-title="Persistent Instruction Anchoring" data-tt-desc="No mechanism to re-anchor instructions across pipeline stages. Long search result concatenation could dilute the writer&#x27;s system prompt." data-tt-ref="Ch. 6"><strong>Persistent Instruction Anchoring</strong></td>
     <td class="level-cell">Intermediate</td>
-    <td><span class="status-badge status-na has-tooltip" data-tt-title="Persistent Instruction Anchoring: Not Assessed" data-tt-desc="A pattern that uses semantically significant tags (e.g., &lt;CRITICAL_INSTRUCTION&gt;, [GOAL]) to embed high-priority goals or constraints within agent prompts, ensuring critical instructions remain salient as they are passed down hierarchical agent chains and are not lost to the LLM&#x27;s &#x27;lost in the middle&#x27; problem." data-tt-ref="Ch. 6">Not Assessed</span></td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Persistent Instruction Anchoring: Missing" data-tt-desc="No mechanism to re-anchor instructions across pipeline stages. Long search result concatenation could dilute the writer&#x27;s system prompt." data-tt-ref="Ch. 6">Missing</span></td>
   </tr>
   <tr>
     <td class="has-tooltip" data-tt-title="Causal Dependency Graph" data-tt-desc="An auditability pattern that creates a structured, machine-readable record of an entire workflow&#x27;s data and decision lineage by logging each agent&#x27;s inputs, outputs, and dependencies as nodes in a traversable graph, enabling root-cause analysis, debugging, and regulatory compliance." data-tt-ref="Ch. 6"><strong>Causal Dependency Graph</strong></td>
@@ -699,9 +710,9 @@ footer a { color: var(--accent); text-decoration: none; }
     <td><span class="status-badge status-na has-tooltip" data-tt-title="Causal Dependency Graph: Not Assessed" data-tt-desc="An auditability pattern that creates a structured, machine-readable record of an entire workflow&#x27;s data and decision lineage by logging each agent&#x27;s inputs, outputs, and dependencies as nodes in a traversable graph, enabling root-cause analysis, debugging, and regulatory compliance." data-tt-ref="Ch. 6">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Fractal CoT Embedding" data-tt-desc="Verifier identifies issues but report is never revised. No feedback loop from verification back to writing. Verification result is printed alongside unchanged report." data-tt-ref="Ch. 6"><strong>Fractal CoT Embedding</strong></td>
+    <td class="has-tooltip" data-tt-title="Fractal CoT Embedding" data-tt-desc="No retry loops, no feedback from verification to writing. VerifierAgent output is printed but not acted upon." data-tt-ref="Ch. 6"><strong>Fractal CoT Embedding</strong></td>
     <td class="level-cell">Advanced</td>
-    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Fractal CoT Embedding: Missing" data-tt-desc="Verifier identifies issues but report is never revised. No feedback loop from verification back to writing. Verification result is printed alongside unchanged report." data-tt-ref="Ch. 6">Missing</span></td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Fractal CoT Embedding: Missing" data-tt-desc="No retry loops, no feedback from verification to writing. VerifierAgent output is printed but not acted upon." data-tt-ref="Ch. 6">Missing</span></td>
   </tr>
   </tbody></table>
   </div>
@@ -720,14 +731,14 @@ footer a { color: var(--accent); text-decoration: none; }
   </tr></thead>
   <tbody>
   <tr>
-    <td class="has-tooltip" data-tt-title="Watchdog Timeout" data-tt-desc="Wrap every Runner.run() call in asyncio.wait_for(timeout=30). In manager.py:55, the planner call has no timeout — a hung o3-mini response blocks the entire pipeline. The Watchdog pattern (Ch. 7, p. 212) prescribes a timed execution block with fallback behavior on timeout." data-tt-ref="Ch. 7"><strong>Watchdog Timeout</strong></td>
+    <td class="has-tooltip" data-tt-title="Watchdog Timeout" data-tt-desc="A reliability pattern where an orchestrator wraps agent calls with a timed execution block; if the agent becomes unresponsive or hangs past the timeout period, the supervisor cancels the task and triggers a fallback, preventing silent stalls from freezing entire workflows." data-tt-ref="Ch. 7"><strong>Watchdog Timeout</strong></td>
     <td class="level-cell">Basic</td>
-    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Watchdog Timeout: Missing" data-tt-desc="Wrap every Runner.run() call in asyncio.wait_for(timeout=30). In manager.py:55, the planner call has no timeout — a hung o3-mini response blocks the entire pipeline. The Watchdog pattern (Ch. 7, p. 212) prescribes a timed execution block with fallback behavior on timeout." data-tt-ref="Ch. 7">Missing</span></td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Watchdog Timeout: Not Assessed" data-tt-desc="A reliability pattern where an orchestrator wraps agent calls with a timed execution block; if the agent becomes unresponsive or hangs past the timeout period, the supervisor cancels the task and triggers a fallback, preventing silent stalls from freezing entire workflows." data-tt-ref="Ch. 7">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Simple Retry Mechanism" data-tt-desc="Replace the bare except in manager.py:73 with retry logic: 3 attempts with exponential backoff (1s, 2s, 4s). Currently, a transient rate-limit error from the search API is treated as a permanent failure. Ch. 7 recommends retrying on TimeoutError, ConnectionError, and HTTP 429/503." data-tt-ref="Ch. 7"><strong>Simple Retry Mechanism</strong></td>
+    <td class="has-tooltip" data-tt-title="Simple Retry Mechanism" data-tt-desc="Search failures in manager.py:108 are caught with bare except and return None. No retry, no backoff, no fallback strategy." data-tt-ref="Ch. 7"><strong>Simple Retry Mechanism</strong></td>
     <td class="level-cell">Basic</td>
-    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Simple Retry Mechanism: Missing" data-tt-desc="Replace the bare except in manager.py:73 with retry logic: 3 attempts with exponential backoff (1s, 2s, 4s). Currently, a transient rate-limit error from the search API is treated as a permanent failure. Ch. 7 recommends retrying on TimeoutError, ConnectionError, and HTTP 429/503." data-tt-ref="Ch. 7">Missing</span></td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Simple Retry Mechanism: Missing" data-tt-desc="Search failures in manager.py:108 are caught with bare except and return None. No retry, no backoff, no fallback strategy." data-tt-ref="Ch. 7">Missing</span></td>
   </tr>
   <tr>
     <td class="has-tooltip" data-tt-title="Adaptive Retry with Prompt Mutation" data-tt-desc="An intelligent retry mechanism that modifies the prompt after a deterministic failure by rephrasing instructions, adding few-shot examples, requesting chain-of-thought reasoning, or tightening output constraints, guiding a confused LLM out of a cognitive failure loop rather than simply resending the same failing request." data-tt-ref="Ch. 7"><strong>Adaptive Retry with Prompt Mutation</strong></td>
@@ -740,9 +751,9 @@ footer a { color: var(--accent); text-decoration: none; }
     <td><span class="status-badge status-na has-tooltip" data-tt-title="Auto-Healing Agent Resuscitation: Not Assessed" data-tt-desc="A pattern for building self-healing systems where a supervisor continuously monitors worker agents through health checks and heartbeats, automatically restarting agents that crash or become unresponsive, often combined with checkpointing for stateful recovery." data-tt-ref="Ch. 7">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Incremental Checkpointing" data-tt-desc="After _perform_searches completes (manager.py:38), serialize search_results to a JSON checkpoint file. If _write_report crashes, the manager can reload from checkpoint instead of re-running all searches. Ch. 7, p. 218: &#x27;save intermediate output to a durable data store.&#x27;" data-tt-ref="Ch. 7"><strong>Incremental Checkpointing</strong></td>
+    <td class="has-tooltip" data-tt-title="Incremental Checkpointing" data-tt-desc="After _perform_searches completes, serialize search_results to disk (JSON or pickle). Before _write_report, check for a checkpoint file — if found, load it instead of re-searching. This is the cheapest resilience win: one file write protects against all downstream crashes. (Ch.7 p.221)" data-tt-ref="Ch. 7"><strong>Incremental Checkpointing</strong></td>
     <td class="level-cell">Intermediate</td>
-    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Incremental Checkpointing: Missing" data-tt-desc="After _perform_searches completes (manager.py:38), serialize search_results to a JSON checkpoint file. If _write_report crashes, the manager can reload from checkpoint instead of re-running all searches. Ch. 7, p. 218: &#x27;save intermediate output to a durable data store.&#x27;" data-tt-ref="Ch. 7">Missing</span></td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Incremental Checkpointing: Missing" data-tt-desc="After _perform_searches completes, serialize search_results to disk (JSON or pickle). Before _write_report, check for a checkpoint file — if found, load it instead of re-searching. This is the cheapest resilience win: one file write protects against all downstream crashes. (Ch.7 p.221)" data-tt-ref="Ch. 7">Missing</span></td>
   </tr>
   <tr>
     <td class="has-tooltip" data-tt-title="Fallback Model Invocation" data-tt-desc="A resilience pattern providing automatic runtime switching from a failing primary LLM to a reliable backup model when the primary experiences outages, performance degradation, or produces invalid outputs, ensuring continuous service availability through graceful degradation." data-tt-ref="Ch. 7"><strong>Fallback Model Invocation</strong></td>
@@ -775,7 +786,7 @@ footer a { color: var(--accent); text-decoration: none; }
 <div class="cat-scorecard ani">
   <div class="cat-scorecard-header">
     <h3>Human-Agent Interaction</h3>
-    <span class="status-badge rating-established">&#x2713; Established</span>
+    <span class="status-badge rating-emerging">&#x25B2; Emerging</span>
   </div>
   <div class="cat-scorecard-body">
   <table class="scorecard-table">
@@ -786,19 +797,19 @@ footer a { color: var(--accent); text-decoration: none; }
   </tr></thead>
   <tbody>
   <tr>
-    <td class="has-tooltip" data-tt-title="Human Calls Agent" data-tt-desc="main.py: User enters query via input_with_fallback(), manager runs autonomously. Clean human→agent invocation pattern." data-tt-ref="Ch. 8"><strong>Human Calls Agent</strong></td>
+    <td class="has-tooltip" data-tt-title="Human Calls Agent" data-tt-desc="A foundational interaction pattern structuring a direct, transactional request-response cycle where the user provides a specific query or command and the agent quickly classifies intent, selects the best tool, executes it, and returns a concise result." data-tt-ref="Ch. 8"><strong>Human Calls Agent</strong></td>
     <td class="level-cell">Basic</td>
-    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Human Calls Agent: Implemented" data-tt-desc="main.py: User enters query via input_with_fallback(), manager runs autonomously. Clean human→agent invocation pattern." data-tt-ref="Ch. 8">Implemented</span></td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Human Calls Agent: Not Assessed" data-tt-desc="A foundational interaction pattern structuring a direct, transactional request-response cycle where the user provides a specific query or command and the agent quickly classifies intent, selects the best tool, executes it, and returns a concise result." data-tt-ref="Ch. 8">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Agent Calls Human" data-tt-desc="This is a batch research pipeline that runs autonomously from a single query. Human-in-the-loop would disrupt the automated flow for this use case." data-tt-ref="Ch. 8"><strong>Agent Calls Human</strong></td>
+    <td class="has-tooltip" data-tt-title="Agent Calls Human" data-tt-desc="A human-agent interaction pattern in which an agent autonomously pauses its operation to escalate a decision to a human expert when its confidence falls below a threshold, when ambiguity is detected, or when company policy mandates human approval for high-stakes actions." data-tt-ref="Ch. 8"><strong>Agent Calls Human</strong></td>
     <td class="level-cell">Basic</td>
-    <td><span class="status-badge status-na has-tooltip" data-tt-title="Agent Calls Human: N/A" data-tt-desc="This is a batch research pipeline that runs autonomously from a single query. Human-in-the-loop would disrupt the automated flow for this use case." data-tt-ref="Ch. 8">N/A</span></td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Agent Calls Human: Not Assessed" data-tt-desc="A human-agent interaction pattern in which an agent autonomously pauses its operation to escalate a decision to a human expert when its confidence falls below a threshold, when ambiguity is detected, or when company policy mandates human approval for high-stakes actions." data-tt-ref="Ch. 8">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Agent Delegates to Agent" data-tt-desc="manager.py: Manager delegates to planner_agent, search_agent, writer_agent, verifier_agent. Writer delegates to financials_agent and risk_agent via as_tool()." data-tt-ref="Ch. 8"><strong>Agent Delegates to Agent</strong></td>
+    <td class="has-tooltip" data-tt-title="Agent Delegates to Agent" data-tt-desc="WriterAgent delegates to FundamentalsAnalystAgent and RiskAnalystAgent via as_tool() in manager.py:114-123. Sub-agents are wrapped as tools with custom_output_extractor." data-tt-ref="Ch. 8"><strong>Agent Delegates to Agent</strong></td>
     <td class="level-cell">Intermediate</td>
-    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Agent Delegates to Agent: Implemented" data-tt-desc="manager.py: Manager delegates to planner_agent, search_agent, writer_agent, verifier_agent. Writer delegates to financials_agent and risk_agent via as_tool()." data-tt-ref="Ch. 8">Implemented</span></td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Agent Delegates to Agent: Implemented" data-tt-desc="WriterAgent delegates to FundamentalsAnalystAgent and RiskAnalystAgent via as_tool() in manager.py:114-123. Sub-agents are wrapped as tools with custom_output_extractor." data-tt-ref="Ch. 8">Implemented</span></td>
   </tr>
   <tr>
     <td class="has-tooltip" data-tt-title="Agent Calls Proxy Agent" data-tt-desc="A security pattern introducing a specialized intermediary proxy agent that acts as a secure gateway to external systems, centralizing credentials and API logic so that primary agents never handle sensitive external access directly." data-tt-ref="Ch. 8"><strong>Agent Calls Proxy Agent</strong></td>
@@ -822,9 +833,9 @@ footer a { color: var(--accent); text-decoration: none; }
   </tr></thead>
   <tbody>
   <tr>
-    <td class="has-tooltip" data-tt-title="Single Agent Baseline" data-tt-desc="Each of the 6 agents (planner, search, financials, risk, writer, verifier) is a well-defined Agent() with specific instructions, model, and output_type. Clean single-agent definitions." data-tt-ref="Ch. 9"><strong>Single Agent Baseline</strong></td>
+    <td class="has-tooltip" data-tt-title="Single Agent Baseline" data-tt-desc="SearchAgent uses WebSearchTool() in search_agent.py:12. Sub-agents exposed as tools via as_tool() pattern." data-tt-ref="Ch. 9"><strong>Single Agent Baseline</strong></td>
     <td class="level-cell">Basic</td>
-    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Single Agent Baseline: Implemented" data-tt-desc="Each of the 6 agents (planner, search, financials, risk, writer, verifier) is a well-defined Agent() with specific instructions, model, and output_type. Clean single-agent definitions." data-tt-ref="Ch. 9">Implemented</span></td>
+    <td><span class="status-badge status-implemented has-tooltip" data-tt-title="Single Agent Baseline: Implemented" data-tt-desc="SearchAgent uses WebSearchTool() in search_agent.py:12. Sub-agents exposed as tools via as_tool() pattern." data-tt-ref="Ch. 9">Implemented</span></td>
   </tr>
   <tr>
     <td class="has-tooltip" data-tt-title="Agent-Specific Memory (Short-Term)" data-tt-desc="" data-tt-ref="Ch. 9"><strong>Agent-Specific Memory (Short-Term)</strong></td>
@@ -832,9 +843,9 @@ footer a { color: var(--accent); text-decoration: none; }
     <td><span class="status-badge status-na has-tooltip" data-tt-title="Agent-Specific Memory (Short-Term): Not Assessed" data-tt-desc="" data-tt-ref="Ch. 9">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Context-Aware Retrieval (Simple RAG)" data-tt-desc="search_agent.py uses WebSearchTool for real-time retrieval. But no document store, no indexed knowledge base (10-Ks, filings). Retrieval is web-only, not context-aware." data-tt-ref="Ch. 9"><strong>Context-Aware Retrieval (Simple RAG)</strong></td>
+    <td class="has-tooltip" data-tt-title="Context-Aware Retrieval (Simple RAG)" data-tt-desc="" data-tt-ref="Ch. 9"><strong>Context-Aware Retrieval (Simple RAG)</strong></td>
     <td class="level-cell">Basic</td>
-    <td><span class="status-badge status-partial has-tooltip" data-tt-title="Context-Aware Retrieval (Simple RAG): Partial" data-tt-desc="search_agent.py uses WebSearchTool for real-time retrieval. But no document store, no indexed knowledge base (10-Ks, filings). Retrieval is web-only, not context-aware." data-tt-ref="Ch. 9">Partial</span></td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Context-Aware Retrieval (Simple RAG): Not Assessed" data-tt-desc="" data-tt-ref="Ch. 9">Not Assessed</span></td>
   </tr>
   <tr>
     <td class="has-tooltip" data-tt-title="Advanced RAG" data-tt-desc="" data-tt-ref="Ch. 9"><strong>Advanced RAG</strong></td>
@@ -873,9 +884,9 @@ footer a { color: var(--accent); text-decoration: none; }
     <td><span class="status-badge status-na has-tooltip" data-tt-title="Tool &amp; Agent Registry: Not Assessed" data-tt-desc="A centralized registry service acting as a dynamic &#x27;yellow pages&#x27; for an agentic ecosystem, where tools and agents register their capabilities, endpoints, and schemas so that other agents can discover and invoke them at runtime without hardcoded knowledge." data-tt-ref="Ch. 10">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Event-Driven Reactivity" data-tt-desc="The capability of agents to perceive their operational environment and respond to changes or events within it, a key characteristic distinguishing true AI agents from basic LLM interactions." data-tt-ref="Ch. 10"><strong>Event-Driven Reactivity</strong></td>
+    <td class="has-tooltip" data-tt-title="Event-Driven Reactivity" data-tt-desc="Fully synchronous pipeline with no event system. No way for agents to react to discoveries mid-pipeline." data-tt-ref="Ch. 10"><strong>Event-Driven Reactivity</strong></td>
     <td class="level-cell">Intermediate</td>
-    <td><span class="status-badge status-na has-tooltip" data-tt-title="Event-Driven Reactivity: Not Assessed" data-tt-desc="The capability of agents to perceive their operational environment and respond to changes or events within it, a key characteristic distinguishing true AI agents from basic LLM interactions." data-tt-ref="Ch. 10">Not Assessed</span></td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Event-Driven Reactivity: Missing" data-tt-desc="Fully synchronous pipeline with no event system. No way for agents to react to discoveries mid-pipeline." data-tt-ref="Ch. 10">Missing</span></td>
   </tr>
   </tbody></table>
   </div>
@@ -899,9 +910,9 @@ footer a { color: var(--accent); text-decoration: none; }
     <td><span class="status-badge status-na has-tooltip" data-tt-title="Hybrid Workflow Agent Architecture (Planner + Scorer): Not Assessed" data-tt-desc="" data-tt-ref="Ch. 14">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Coevolved Agent Training" data-tt-desc="A continuous improvement mechanism where agents use multi-turn feedback loops to critique, correct, and refine outputs iteratively, leading to ongoing process improvement in advanced multi-agent systems." data-tt-ref="Ch. 14"><strong>Coevolved Agent Training</strong></td>
+    <td class="has-tooltip" data-tt-title="Coevolved Agent Training" data-tt-desc="This is an inference-time system, not a training pipeline. No agent fine-tuning or co-evolution involved." data-tt-ref="Ch. 14"><strong>Coevolved Agent Training</strong></td>
     <td class="level-cell">Advanced</td>
-    <td><span class="status-badge status-na has-tooltip" data-tt-title="Coevolved Agent Training: Not Assessed" data-tt-desc="A continuous improvement mechanism where agents use multi-turn feedback loops to critique, correct, and refine outputs iteratively, leading to ongoing process improvement in advanced multi-agent systems." data-tt-ref="Ch. 14">Not Assessed</span></td>
+    <td><span class="status-badge status-na has-tooltip" data-tt-title="Coevolved Agent Training: N/A" data-tt-desc="This is an inference-time system, not a training pipeline. No agent fine-tuning or co-evolution involved." data-tt-ref="Ch. 14">N/A</span></td>
   </tr>
   <tr>
     <td class="has-tooltip" data-tt-title="Preference-Controlled Synthetic Data Generation" data-tt-desc="" data-tt-ref="Ch. 14"><strong>Preference-Controlled Synthetic Data Generation</strong></td>
@@ -909,9 +920,9 @@ footer a { color: var(--accent); text-decoration: none; }
     <td><span class="status-badge status-na has-tooltip" data-tt-title="Preference-Controlled Synthetic Data Generation: Not Assessed" data-tt-desc="" data-tt-ref="Ch. 14">Not Assessed</span></td>
   </tr>
   <tr>
-    <td class="has-tooltip" data-tt-title="Custom Evaluation Metrics" data-tt-desc="Verifier uses generic LLM judgment (&#x27;is it consistent and sourced?&#x27;). No codified metrics for report quality — no citation accuracy score, confidence level, or coverage metrics." data-tt-ref="Ch. 14"><strong>Custom Evaluation Metrics</strong></td>
+    <td class="has-tooltip" data-tt-title="Custom Evaluation Metrics" data-tt-desc="VerifierAgent uses a generic prompt (&#x27;meticulous auditor&#x27;) with no domain-specific financial metrics, scoring rubric, or structured evaluation criteria." data-tt-ref="Ch. 14"><strong>Custom Evaluation Metrics</strong></td>
     <td class="level-cell">Advanced</td>
-    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Custom Evaluation Metrics: Missing" data-tt-desc="Verifier uses generic LLM judgment (&#x27;is it consistent and sourced?&#x27;). No codified metrics for report quality — no citation accuracy score, confidence level, or coverage metrics." data-tt-ref="Ch. 14">Missing</span></td>
+    <td><span class="status-badge status-missing has-tooltip" data-tt-title="Custom Evaluation Metrics: Missing" data-tt-desc="VerifierAgent uses a generic prompt (&#x27;meticulous auditor&#x27;) with no domain-specific financial metrics, scoring rubric, or structured evaluation criteria." data-tt-ref="Ch. 14">Missing</span></td>
   </tr>
   </tbody></table>
   </div>
@@ -933,24 +944,30 @@ footer a { color: var(--accent); text-decoration: none; }
     <span class="mermaid-title">Current Architecture</span>
     <pre class="mermaid">
 flowchart TD
-    User(["👤 User Query"]):::blue --> Planner["📋 PlannerAgent\n(o3-mini)"]:::blue
-    Planner --> |"FinancialSearchPlan\n5-15 items"| FanOut{"🔀 Fan-Out"}:::blue
-    FanOut --> S1["🔍 SearchAgent 1"]:::blue
-    FanOut --> S2["🔍 SearchAgent 2"]:::blue
-    FanOut --> SN["🔍 SearchAgent N"]:::blue
-    S1 --> Collect{"📥 Collect"}:::blue
+    User([User Query]) --> Manager[FinancialResearchManager]
+    Manager --> Planner[PlannerAgent\no3-mini]
+    Planner --> |FinancialSearchPlan| FanOut{Parallel Fan-Out}
+    FanOut --> S1[SearchAgent 1]
+    FanOut --> S2[SearchAgent 2]
+    FanOut --> SN[SearchAgent N]
+    S1 --> Collect[Collect Results]
     S2 --> Collect
     SN --> Collect
-    Collect --> |"search_results[]"| Writer["✍️ WriterAgent\n(gpt-5.4)"]:::blue
-    Writer --> |"as_tool()"| Fundamentals["📊 FundamentalsAnalyst"]:::blue
-    Writer --> |"as_tool()"| Risk["⚠️ RiskAnalyst"]:::blue
-    Fundamentals --> |"AnalysisSummary"| Writer
-    Risk --> |"AnalysisSummary"| Writer
-    Writer --> |"FinancialReportData"| Verifier["✅ VerifierAgent\n(gpt-5.4)"]:::blue
-    Verifier --> |"VerificationResult\n(terminal, no feedback)"| Output([" 📄 Report + Verification"]):::blue
+    Collect --> Writer[WriterAgent\ngpt-5.4]
+    Writer -.-> |as_tool| Fundamentals[FundamentalsAnalystAgent]
+    Writer -.-> |as_tool| Risk[RiskAnalystAgent]
+    Fundamentals -.-> Writer
+    Risk -.-> Writer
+    Writer --> |FinancialReportData| Verifier[VerifierAgent\ngpt-5.4]
+    Verifier --> Output([Print Report])
 
-    classDef blue fill:#E3F2FD,stroke:#1565C0,color:#0D47A1
-    classDef red stroke:#E53935,stroke-dasharray:5 5,fill:#FFEBEE,color:#B71C1C
+    classDef existing fill:#4A90D9,stroke:#333,color:white
+    classDef tool fill:#2ECC71,stroke:#333,color:white
+    classDef io fill:#95a5a6,stroke:#333,color:white
+
+    class Manager,Planner,S1,S2,SN,Writer,Verifier existing
+    class Fundamentals,Risk tool
+    class User,Output,FanOut,Collect io
     </pre>
   </div>
   <div class="mermaid-wrap ani" data-tooltips="tooltips-target">
@@ -963,42 +980,43 @@ flowchart TD
     <span class="mermaid-title">Target Architecture</span>
     <pre class="mermaid">
 flowchart TD
-    User([" 👤 User Query"]):::blue --> Planner["📋 PlannerAgent\n(o3-mini)"]:::blue
-    Planner --> |"FinancialSearchPlan"| FanOut{"🔀 Fan-Out"}:::blue
-    FanOut --> S1["🔍 SearchAgent 1"]:::blue
-    FanOut --> S2["🔍 SearchAgent 2"]:::blue
-    FanOut --> SN["🔍 SearchAgent N"]:::blue
+    User([User Query]) --> Manager[FinancialResearchManager]
+    Manager --> Planner[PlannerAgent\no3-mini]
+    Planner --> |FinancialSearchPlan| FanOut{Parallel Fan-Out}
+    FanOut --> S1[SearchAgent 1]
+    FanOut --> S2[SearchAgent 2]
+    FanOut --> SN[SearchAgent N]
+    S1 --> Collect[Collect Results]
+    S2 --> Collect
+    SN --> Collect
 
-    S1 --> Retry1["🔄 Retry + Timeout"]:::green
-    S2 --> Retry2["🔄 Retry + Timeout"]:::green
-    SN --> RetryN["🔄 Retry + Timeout"]:::green
+    FanOut -.-> WD[Watchdog Timeout\nSupervisor]:::opportunity
+    S1 -.-> RT[Adaptive Retry\n+ Prompt Mutation]:::opportunity
+    S2 -.-> RT
+    SN -.-> RT
 
-    Retry1 --> Collect{"📥 Collect"}:::blue
-    Retry2 --> Collect
-    RetryN --> Collect
+    Collect --> CP1[Checkpoint\nSearch Results]:::opportunity
+    CP1 --> SharedMem[(Shared Epistemic\nMemory)]:::newpattern
+    SharedMem --> Writer[WriterAgent\ngpt-5.4]
+    Writer -.-> |as_tool| Fundamentals[FundamentalsAnalystAgent]
+    Writer -.-> |as_tool| Risk[RiskAnalystAgent]
+    Fundamentals -.-> Writer
+    Risk -.-> Writer
 
-    Collect --> CP1["💾 Checkpoint"]:::green
-    CP1 --> Writer["✍️ WriterAgent"]:::blue
+    Writer --> |FinancialReportData| Verifier[VerifierAgent\ngpt-5.4\n+ Scoring Rubric]:::newpattern
+    Verifier --> |Pass| Output([Print Report])
+    Verifier --> |Fail + Feedback| Writer
+    Verifier -.-> Metrics[Custom Evaluation\nMetrics]:::opportunity
 
-    Writer --> |"as_tool()"| Fundamentals["📊 FundamentalsAnalyst"]:::blue
-    Writer --> |"as_tool()"| Risk["⚠️ RiskAnalyst"]:::blue
-    Fundamentals --> |"AnalysisSummary"| Writer
-    Risk --> |"AnalysisSummary"| Writer
+    classDef existing fill:#4A90D9,stroke:#333,color:white
+    classDef tool fill:#2ECC71,stroke:#333,color:white
+    classDef io fill:#95a5a6,stroke:#333,color:white
+    classDef opportunity fill:none,stroke:#E74C3C,stroke-dasharray:5 5,color:#E74C3C
+    classDef newpattern fill:#27AE60,stroke:#333,color:white
 
-    Writer --> Verifier["✅ VerifierAgent"]:::blue
-    Verifier --> |"verified=false"| RevisionLoop["🔄 Self-Correction\nLoop"]:::green
-    RevisionLoop --> |"critique + revise"| Writer
-    Verifier --> |"verified=true"| Metrics["📏 Quality Metrics"]:::green
-    Metrics --> Output(["📄 Verified Report"]):::blue
-
-    Logger["📝 Structured\nAudit Log"]:::green
-    Planner -.-> Logger
-    Writer -.-> Logger
-    Verifier -.-> Logger
-
-    classDef blue fill:#E3F2FD,stroke:#1565C0,color:#0D47A1
-    classDef green fill:#E8F5E9,stroke:#2E7D32,color:#1B5E20
-    classDef red stroke:#E53935,stroke-dasharray:5 5,fill:#FFEBEE,color:#B71C1C
+    class Manager,Planner,S1,S2,SN,Writer existing
+    class Fundamentals,Risk tool
+    class User,Output,FanOut,Collect io
     </pre>
   </div>
 </div>
@@ -1013,7 +1031,7 @@ flowchart TD
     <div class="rec-card">
       <h4>Basic Audit Logging <span class="priority-badge priority-high">High</span></h4>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Basic pattern</div>
-      <p>Add Python logging (logging.getLogger) to manager.py. Log agent invocations with input/output summaries, latency, and any errors. The OpenAI trace integration provides external observability but no local audit trail for debugging.</p>
+      <p>Key capabilities: Agent actions are logged with timestamps, agent IDs, and outcome status to a file or console output; Log entries are generated before and after critical agent operations or decisions; A centralized logging mechanism captures audit trails across multiple agents in the system.</p>
     </div>
     <div class="rec-card">
       <h4>Instruction Fidelity Auditing <span class="priority-badge priority-critical">Critical</span></h4>
@@ -1043,12 +1061,12 @@ flowchart TD
     <div class="rec-card">
       <h4>Watchdog Timeout <span class="priority-badge priority-high">High</span></h4>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Basic pattern</div>
-      <p>Wrap every Runner.run() call in asyncio.wait_for(timeout=30). In manager.py:55, the planner call has no timeout — a hung o3-mini response blocks the entire pipeline. The Watchdog pattern (Ch. 7, p. 212) prescribes a timed execution block with fallback behavior on timeout.</p>
+      <p>A reliability pattern where an orchestrator wraps agent calls with a timed execution block; if the agent becomes unresponsive or hangs past the timeout period, the supervisor cancels the task and triggers a fallback, preventing silent stalls from freezing entire workflows.</p>
     </div>
     <div class="rec-card">
       <h4>Simple Retry Mechanism <span class="priority-badge priority-high">High</span></h4>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Basic pattern</div>
-      <p>Replace the bare except in manager.py:73 with retry logic: 3 attempts with exponential backoff (1s, 2s, 4s). Currently, a transient rate-limit error from the search API is treated as a permanent failure. Ch. 7 recommends retrying on TimeoutError, ConnectionError, and HTTP 429/503.</p>
+      <p>A robustness pattern that implements an intelligent retry mechanism where, upon a deterministic failure, the system modifies or mutates the prompt (via rephrasing, adding examples, decomposition, or constraint tightening) rather than resending the same request, increasing the likelihood of successful recovery.</p>
     </div>
     <div class="rec-card">
       <h4>Adaptive Retry with Prompt Mutation <span class="priority-badge priority-high">High</span></h4>
@@ -1063,7 +1081,7 @@ flowchart TD
     <div class="rec-card">
       <h4>Incremental Checkpointing <span class="priority-badge priority-high">High</span></h4>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
-      <p>After _perform_searches completes (manager.py:38), serialize search_results to a JSON checkpoint file. If _write_report crashes, the manager can reload from checkpoint instead of re-running all searches. Ch. 7, p. 218: &#x27;save intermediate output to a durable data store.&#x27;</p>
+      <p>After _perform_searches completes, serialize search_results to disk (JSON or pickle). Before _write_report, check for a checkpoint file — if found, load it instead of re-searching. This is the cheapest resilience win: one file write protects against all downstream crashes. (Ch.7 p.221)</p>
     </div>
     <div class="rec-card">
       <h4>Fallback Model Invocation <span class="priority-badge priority-high">High</span></h4>
@@ -1121,11 +1139,6 @@ flowchart TD
       <p>Key capabilities: A planner agent generates workflow plans or task sequences that are passed to other components; A scorer agent evaluates or rates the quality of generated workflows or plans; The system contains feedback loops where scorer outputs influence planner behavior or workflow refinement.</p>
     </div>
     <div class="rec-card">
-      <h4>Coevolved Agent Training <span class="priority-badge priority-high">High</span></h4>
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Advanced pattern</div>
-      <p>A continuous improvement mechanism where agents use multi-turn feedback loops to critique, correct, and refine outputs iteratively, leading to ongoing process improvement in advanced multi-agent systems.</p>
-    </div>
-    <div class="rec-card">
       <h4>Preference-Controlled Synthetic Data Generation <span class="priority-badge priority-high">High</span></h4>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Advanced pattern</div>
       <p>Key capabilities: Synthetic data generation functions include explicit preference or control parameters in their function signatures; Data generation processes have configured offline evaluation benchmarks or validation datasets; Human-in-the-loop validation checkpoints are implemented with manual approval gates or review workflows.</p>
@@ -1138,27 +1151,22 @@ flowchart TD
   </div>
 </div>
 <div class="rec-phase phase-3 ani">
-  <div class="phase-header">Phase 5: Coordination &amp; Planning  <span class="status-badge rating-emerging" style="margin-left:8px;font-size:11px;">Currently Emerging</span></div>
+  <div class="phase-header">Phase 5: Human-Agent Interaction  <span class="status-badge rating-emerging" style="margin-left:8px;font-size:11px;">Currently Emerging</span></div>
   <div class="rec-cards">
     <div class="rec-card">
-      <h4>Supervisor Architecture <span class="priority-badge priority-critical">Critical</span></h4>
+      <h4>Human Calls Agent <span class="priority-badge priority-high">High</span></h4>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Basic pattern</div>
-      <p>A core multi-agent pattern with a central orchestrator agent that manages and directs the workflow of specialized worker agents, mirroring a traditional hierarchical management structure for structured, predictable business processes.</p>
+      <p>A foundational interaction pattern structuring a direct, transactional request-response cycle where the user provides a specific query or command and the agent quickly classifies intent, selects the best tool, executes it, and returns a concise result.</p>
     </div>
     <div class="rec-card">
-      <h4>Hybrid Delegation Framework <span class="priority-badge priority-high">High</span></h4>
+      <h4>Agent Calls Human <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Basic pattern</div>
+      <p>A human-agent interaction pattern in which an agent autonomously pauses its operation to escalate a decision to a human expert when its confidence falls below a threshold, when ambiguity is detected, or when company policy mandates human approval for high-stakes actions.</p>
+    </div>
+    <div class="rec-card">
+      <h4>Agent Calls Proxy Agent <span class="priority-badge priority-critical">Critical</span></h4>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
-      <p>A market-based agent composition topology implementing a Contract-Net Protocol where a solicitor broadcasts task announcements to bidder agents, who respond with formal bids containing capability, cost, ETA, and confidence scores; the solicitor then awards the task to the agent with the highest utility score for dynamic, runtime task assignment.</p>
-    </div>
-    <div class="rec-card">
-      <h4>Shared Epistemic Memory <span class="priority-badge priority-high">High</span></h4>
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
-      <p>Introduce a shared context dict that accumulates findings across agents. The risk analyst and financials analyst currently operate in isolation — if both discover the same earnings miss, they duplicate work. A shared blackboard would let them build on each other&#x27;s findings.</p>
-    </div>
-    <div class="rec-card">
-      <h4>Consensus, Negotiation &amp; Conflict Resolution <span class="priority-badge priority-high">High</span></h4>
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Advanced pattern</div>
-      <p>A pattern where agents with conflicting data engage in iterative debate to converge on a shared understanding in advanced multi-agent systems.</p>
+      <p>A security pattern introducing a specialized intermediary proxy agent that acts as a secure gateway to external systems, centralizing credentials and API logic so that primary agents never handle sensitive external access directly.</p>
     </div>
   </div>
 </div>
@@ -1188,12 +1196,22 @@ flowchart TD
   </div>
 </div>
 <div class="rec-phase phase-3 ani">
-  <div class="phase-header">Phase 7: Human-Agent Interaction  <span class="status-badge rating-established" style="margin-left:8px;font-size:11px;">Currently Established</span></div>
+  <div class="phase-header">Phase 7: Coordination &amp; Planning  <span class="status-badge rating-established" style="margin-left:8px;font-size:11px;">Currently Established</span></div>
   <div class="rec-cards">
     <div class="rec-card">
-      <h4>Agent Calls Proxy Agent <span class="priority-badge priority-critical">Critical</span></h4>
+      <h4>Hybrid Delegation Framework <span class="priority-badge priority-high">High</span></h4>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
-      <p>A security pattern introducing a specialized intermediary proxy agent that acts as a secure gateway to external systems, centralizing credentials and API logic so that primary agents never handle sensitive external access directly.</p>
+      <p>A market-based agent composition topology implementing a Contract-Net Protocol where a solicitor broadcasts task announcements to bidder agents, who respond with formal bids containing capability, cost, ETA, and confidence scores; the solicitor then awards the task to the agent with the highest utility score for dynamic, runtime task assignment.</p>
+    </div>
+    <div class="rec-card">
+      <h4>Shared Epistemic Memory <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Intermediate pattern</div>
+      <p>Replace the flat string concatenation in manager.py:126 with a typed SharedMemory class backed by Redis or in-memory dict. Expose via typed tools like get_search_results(topic) rather than passing raw strings. Add TTL timestamps so agents can assess data freshness. (Ch.6 p.197-203)</p>
+    </div>
+    <div class="rec-card">
+      <h4>Consensus, Negotiation &amp; Conflict Resolution <span class="priority-badge priority-high">High</span></h4>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">Advanced pattern</div>
+      <p>A pattern where agents with conflicting data engage in iterative debate to converge on a shared understanding in advanced multi-agent systems.</p>
     </div>
   </div>
 </div>
@@ -1255,75 +1273,16 @@ flowchart TD
 <details class="scenario ani">
   <summary>
     <span class="severity-tag severity-critical">CRITICAL</span>
-    Strengthening Supervisor Architecture → Multiple agents need coordination for complex task
-  </summary>
-  <div class="scenario-body">
-    <div class="cascade-step">
-      <span class="cascade-num">1</span>
-      <div>Agents produce differing outputs <span class="cascade-ref">manager.py:73</span></div>
-    </div>
-    <div class="cascade-step">
-      <span class="cascade-num">2</span>
-      <div>no arbitration mechanism</div>
-    </div>
-    <div class="cascade-step">
-      <span class="cascade-num">3</span>
-      <div>results merged without reconciliation</div>
-    </div>
-    <div class="cascade-step">
-      <span class="cascade-num">4</span>
-      <div>potentially contradictory final output</div>
-    </div>
-    <p style="margin-top:12px;font-size:0.85rem;"><strong>Recovery:</strong> Implement Supervisor Architecture (Ch. 5)</p>
-    <p style="margin-top:8px;font-size:0.85rem;color:var(--amber);"><strong>Foundation dependency:</strong> Supervisor Architecture (basic) is not yet in place — these higher-level patterns would benefit from it as a foundation</p>
-    <div class="book-ref">Ch. 5 &mdash; Supervisor Architecture</div>
-  </div>
-</details>
-
-<details class="scenario ani">
-  <summary>
-    <span class="severity-tag severity-critical">CRITICAL</span>
-    Without Watchdog Timeout → External API hangs or agent enters infinite loop
-  </summary>
-  <div class="scenario-body">
-    <div class="cascade-step">
-      <span class="cascade-num">1</span>
-      <div>Agent hangs on API call <span class="cascade-ref">manager.py:55</span></div>
-    </div>
-    <div class="cascade-step">
-      <span class="cascade-num">2</span>
-      <div>orchestrator waits indefinitely</div>
-    </div>
-    <div class="cascade-step">
-      <span class="cascade-num">3</span>
-      <div>downstream agents remain idle</div>
-    </div>
-    <div class="cascade-step">
-      <span class="cascade-num">4</span>
-      <div>pipeline stalls</div>
-    </div>
-    <div class="cascade-step">
-      <span class="cascade-num">5</span>
-      <div>user experience degrades, resources consumed without progress</div>
-    </div>
-    <p style="margin-top:12px;font-size:0.85rem;"><strong>Recovery:</strong> Implement Watchdog Timeout (target: P99 latency &amp; violation rate; Ch. 7, Table 7.2)</p>
-    <div class="book-ref">Ch. 7 &mdash; Watchdog Timeout Supervisor</div>
-  </div>
-</details>
-
-<details class="scenario ani">
-  <summary>
-    <span class="severity-tag severity-critical">CRITICAL</span>
     Without Simple Retry Mechanism → Transient API failure (503, timeout, rate limit)
   </summary>
   <div class="scenario-body">
     <div class="cascade-step">
       <span class="cascade-num">1</span>
-      <div>API returns 503 <span class="cascade-ref">manager.py:73</span></div>
+      <div>API returns 503 <span class="cascade-ref">manager.py:106</span></div>
     </div>
     <div class="cascade-step">
       <span class="cascade-num">2</span>
-      <div>no retry logic</div>
+      <div>no retry logic <span class="cascade-ref">manager.py:108</span></div>
     </div>
     <div class="cascade-step">
       <span class="cascade-num">3</span>
@@ -1349,7 +1308,7 @@ flowchart TD
 <details class="scenario ani">
   <summary>
     <span class="severity-tag severity-critical">CRITICAL</span>
-    Strengthening Instruction Fidelity Auditing → Agent deviates from system instructions or policy
+    Without Instruction Fidelity Auditing → Agent deviates from system instructions or policy
   </summary>
   <div class="scenario-body">
     <div class="cascade-step">
@@ -1381,7 +1340,7 @@ flowchart TD
   <div class="scenario-body">
     <div class="cascade-step">
       <span class="cascade-num">1</span>
-      <div>Agent B repeats Agent A&#x27;s work</div>
+      <div>Agent B repeats Agent A&#x27;s work <span class="cascade-ref">manager.py:126</span></div>
     </div>
     <div class="cascade-step">
       <span class="cascade-num">2</span>
@@ -1399,6 +1358,60 @@ flowchart TD
     <div class="book-ref">Ch. 5 &mdash; Shared Epistemic Memory</div>
   </div>
 </details>
+
+<details class="scenario ani">
+  <summary>
+    <span class="severity-tag severity-warning">WARNING</span>
+    Without Event-Driven Reactivity → System state changes that require immediate response
+  </summary>
+  <div class="scenario-body">
+    <div class="cascade-step">
+      <span class="cascade-num">1</span>
+      <div>Important system event occurs</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">2</span>
+      <div>no event bus to propagate signal</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">3</span>
+      <div>agents continue normal operation</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">4</span>
+      <div>delayed awareness and response</div>
+    </div>
+    <p style="margin-top:12px;font-size:0.85rem;"><strong>Recovery:</strong> Implement Event-Driven Reactivity (Ch. 10)</p>
+    <div class="book-ref">Ch. 10 &mdash; Event-Driven Reactivity</div>
+  </div>
+</details>
+
+<details class="scenario ani">
+  <summary>
+    <span class="severity-tag severity-info">INFO</span>
+    Without Fractal CoT Embedding → Agent produces incorrect reasoning on first attempt
+  </summary>
+  <div class="scenario-body">
+    <div class="cascade-step">
+      <span class="cascade-num">1</span>
+      <div>Agent generates initial analysis <span class="cascade-ref">manager.py:49</span></div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">2</span>
+      <div>no verification step <span class="cascade-ref">manager.py:62</span></div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">3</span>
+      <div>unreviewed output passed as final</div>
+    </div>
+    <div class="cascade-step">
+      <span class="cascade-num">4</span>
+      <div>downstream decisions rely on unverified results</div>
+    </div>
+    <p style="margin-top:12px;font-size:0.85rem;"><strong>Recovery:</strong> Implement Fractal CoT Embedding (target: Self-correction trigger rate / reduction in final errors; Ch. 9, Table 9.3)</p>
+    <div class="book-ref">Ch. 9 &mdash; Structured Reasoning</div>
+  </div>
+</details>
 </section>
 
 </div>
@@ -1407,7 +1420,7 @@ flowchart TD
 <footer>
   <div class="container">
     Generated by <a href="https://github.com/anthropics/claude-code">Claude Code</a> using <strong>iConsult</strong> MCP &mdash;
-    Consultation ID: <code style="font-family:var(--font-mono);font-size:11px;">a75e464285a1_20260323_003645</code><br>
+    Consultation ID: <code style="font-family:var(--font-mono);font-size:11px;">e8c2adf9c641_20260324_004627</code><br>
     Reference: <em>Agentic Architectural Patterns for Building Multi-Agent Systems</em> (Arsanjani &amp; Bustos, Packt 2026)
   </div>
 </footer>
@@ -1415,165 +1428,93 @@ flowchart TD
 <!-- TOOLTIP METADATA -->
 <script type="application/json" id="tooltips-current">
 {
-  "User": {
-    "title": "User Input",
-    "desc": "Enters a financial research query via CLI prompt",
-    "ref": "main.py:14"
+  "Manager": {
+    "title": "FinancialResearchManager",
+    "desc": "Centralized supervisor orchestrating the full plan\u2192search\u2192write\u2192verify pipeline. Uses Runner.run() for each stage.",
+    "ref": "manager.py:27-63"
   },
   "Planner": {
-    "title": "Planner Agent",
-    "desc": "Generates 5-15 search terms with reasoning. Uses o3-mini for cost efficiency.",
-    "ref": "planner_agent.py"
+    "title": "PlannerAgent (o3-mini)",
+    "desc": "Decomposes user queries into 5-15 search terms with reasoning. Returns typed FinancialSearchPlan.",
+    "ref": "agents/planner_agent.py:30-35"
   },
   "FanOut": {
     "title": "Parallel Fan-Out",
-    "desc": "asyncio.create_task spawns concurrent search tasks via asyncio.as_completed",
-    "ref": "manager.py:62"
+    "desc": "asyncio.create_task spawns parallel search tasks. Results collected via as_completed().",
+    "ref": "manager.py:77-101"
   },
   "S1": {
-    "title": "Search Agent Instance",
-    "desc": "Web search with 300-word summary. Failures silently return None.",
-    "ref": "search_agent.py"
-  },
-  "S2": {
-    "title": "Search Agent Instance",
-    "desc": "Each search runs independently with no coordination between instances",
-    "ref": "manager.py:70"
-  },
-  "SN": {
-    "title": "Search Agent Instance",
-    "desc": "Up to 15 parallel searches \u2014 no rate limiting or backpressure",
-    "ref": "manager.py:62"
-  },
-  "Collect": {
-    "title": "Result Collection",
-    "desc": "Gathers non-None results. Failed searches are silently dropped from the result set.",
-    "ref": "manager.py:64"
+    "title": "SearchAgent Instance",
+    "desc": "Uses WebSearchTool to retrieve financial data. Returns 300-word summary. Failures silently return None.",
+    "ref": "agents/search_agent.py:12-17"
   },
   "Writer": {
-    "title": "Writer Agent",
-    "desc": "Synthesizes search summaries + specialist analyses into markdown report with executive summary",
-    "ref": "writer_agent.py"
+    "title": "WriterAgent (gpt-5.4)",
+    "desc": "Synthesizes search results into markdown report. Can invoke FundamentalsAnalystAgent and RiskAnalystAgent as tools.",
+    "ref": "agents/writer_agent.py:29-34"
   },
   "Fundamentals": {
-    "title": "Fundamentals Analyst",
-    "desc": "Wrapped as tool via as_tool(). Analyzes revenue, profit, margins, growth trajectory.",
-    "ref": "financials_agent.py"
+    "title": "FundamentalsAnalystAgent",
+    "desc": "Analyzes revenue, margins, growth. Exposed as tool via as_tool() with custom_output_extractor.",
+    "ref": "agents/financials_agent.py:19-23"
   },
   "Risk": {
-    "title": "Risk Analyst",
-    "desc": "Wrapped as tool via as_tool(). Identifies competitive threats, regulatory issues.",
-    "ref": "risk_agent.py"
+    "title": "RiskAnalystAgent",
+    "desc": "Identifies competitive threats, regulatory issues. Exposed as tool via as_tool().",
+    "ref": "agents/risk_agent.py:18-22"
   },
   "Verifier": {
-    "title": "Verification Agent",
-    "desc": "Checks internal consistency and sourcing. Output is TERMINAL \u2014 never feeds back to writer.",
-    "ref": "verifier_agent.py"
-  },
-  "Output": {
-    "title": "Final Output",
-    "desc": "Report printed to stdout alongside verification result. No revision even if verified=false.",
-    "ref": "manager.py:44"
+    "title": "VerifierAgent (gpt-5.4)",
+    "desc": "Audits report for consistency and sourcing. Returns VerificationResult but result is only printed, not acted upon.",
+    "ref": "agents/verifier_agent.py:22-27"
   }
 }
 </script>
 
 <script type="application/json" id="tooltips-target">
 {
-  "User": {
-    "title": "User Input",
-    "desc": "Enters financial research query \u2014 unchanged",
-    "ref": "main.py:14"
-  },
-  "Planner": {
-    "title": "Planner Agent",
-    "desc": "Generates search plan \u2014 now with structured audit logging",
-    "ref": "planner_agent.py"
-  },
-  "FanOut": {
-    "title": "Parallel Fan-Out",
-    "desc": "Same asyncio fan-out pattern, now with retry-wrapped search calls",
-    "ref": "manager.py:62"
-  },
-  "S1": {
-    "title": "Search Agent",
-    "desc": "Individual search instance with retry + timeout wrapper",
-    "ref": "search_agent.py"
-  },
-  "S2": {
-    "title": "Search Agent",
-    "desc": "Retry handles transient API errors; timeout prevents hangs",
-    "ref": "search_agent.py"
-  },
-  "SN": {
-    "title": "Search Agent",
-    "desc": "All instances share retry/timeout config from manager",
-    "ref": "search_agent.py"
-  },
-  "Retry1": {
-    "title": "Retry + Timeout (NEW)",
-    "desc": "asyncio.wait_for with 30s timeout + 3 retries with exponential backoff. Logs failures.",
-    "ref": "Ch. 7, p. 212-214"
-  },
-  "Retry2": {
-    "title": "Retry + Timeout (NEW)",
-    "desc": "Same wrapper \u2014 catches TimeoutError and transient API errors",
-    "ref": "Ch. 7, p. 212-214"
-  },
-  "RetryN": {
-    "title": "Retry + Timeout (NEW)",
-    "desc": "After 3 retries, logs error and returns None (explicit, not silent)",
-    "ref": "Ch. 7, p. 212-214"
-  },
-  "Collect": {
-    "title": "Result Collection",
-    "desc": "Same collection \u2014 but now with logged failure counts for observability",
-    "ref": "manager.py:64"
-  },
-  "CP1": {
-    "title": "Checkpoint (NEW)",
-    "desc": "Saves search results to durable store after collection. Allows writer to resume from checkpoint on crash.",
-    "ref": "Ch. 7, p. 218"
-  },
-  "Writer": {
-    "title": "Writer Agent",
-    "desc": "Same synthesis role \u2014 now participates in self-correction loop with verifier",
-    "ref": "writer_agent.py"
-  },
-  "Fundamentals": {
-    "title": "Fundamentals Analyst",
-    "desc": "Unchanged \u2014 still exposed as tool via as_tool()",
-    "ref": "financials_agent.py"
-  },
-  "Risk": {
-    "title": "Risk Analyst",
-    "desc": "Unchanged \u2014 still exposed as tool via as_tool()",
-    "ref": "risk_agent.py"
-  },
-  "Verifier": {
-    "title": "Verification Agent",
-    "desc": "Same auditing role \u2014 but output now drives revision loop when verified=false",
-    "ref": "verifier_agent.py"
-  },
-  "RevisionLoop": {
-    "title": "Self-Correction Loop (NEW)",
-    "desc": "When verified=false, feeds verifier critique back to writer for revision. Max 2 iterations.",
-    "ref": "Ch. 9, p. 299-303"
-  },
-  "Metrics": {
-    "title": "Quality Metrics (NEW)",
-    "desc": "Codified evaluation: citation accuracy, confidence levels, coverage metrics. Replaces generic LLM judgment.",
-    "ref": "Ch. 14"
-  },
-  "Output": {
-    "title": "Verified Report",
-    "desc": "Only output after verification passes. Includes quality metrics.",
+  "Manager": {
+    "title": "FinancialResearchManager",
+    "desc": "Enhanced supervisor with checkpoint/resume, watchdog integration, and verification feedback loop.",
     "ref": "manager.py"
   },
-  "Logger": {
-    "title": "Structured Audit Log (NEW)",
-    "desc": "Local structured logging capturing agent inputs/outputs, errors, latency. Complements OpenAI traces.",
-    "ref": "Ch. 6, p. 177"
+  "Planner": {
+    "title": "PlannerAgent (o3-mini)",
+    "desc": "Unchanged \u2014 solid planning decomposition already in place.",
+    "ref": "agents/planner_agent.py"
+  },
+  "WD": {
+    "title": "Watchdog Timeout Supervisor (NEW)",
+    "desc": "Wraps parallel search tasks with asyncio.wait_for() timeouts. Triggers fallback on stall. Ch.7 p.212.",
+    "ref": "Recommended: manager.py:77"
+  },
+  "RT": {
+    "title": "Adaptive Retry + Prompt Mutation (NEW)",
+    "desc": "Replaces bare except with retry logic. On deterministic failure, mutates the search prompt. Ch.7 p.213-214.",
+    "ref": "Recommended: manager.py:103-109"
+  },
+  "CP1": {
+    "title": "Incremental Checkpoint (NEW)",
+    "desc": "Persists search results to durable store after collection. Enables resume on downstream crash. Ch.7 p.221.",
+    "ref": "Recommended: after manager.py:101"
+  },
+  "SharedMem": {
+    "title": "Shared Epistemic Memory (NEW)",
+    "desc": "Redis-backed typed store replacing flat string concatenation. Agents read/write via typed tools. Ch.6 p.202.",
+    "ref": "Recommended: new shared_memory.py",
+    "status": "missing",
+    "failure_teaser": "Agent B needs context from Agent A's earlier work"
+  },
+  "Verifier": {
+    "title": "VerifierAgent + Scoring Rubric (ENHANCED)",
+    "desc": "Now uses structured financial evaluation metrics and feeds verification failures back to WriterAgent for correction.",
+    "ref": "agents/verifier_agent.py + manager.py"
+  },
+  "Metrics": {
+    "title": "Custom Evaluation Metrics (NEW)",
+    "desc": "Domain-specific financial rubric: source coverage, metric accuracy, claim support ratio. Ch.11 p.343.",
+    "ref": "Recommended: new evaluation_metrics.py",
+    "status": "missing"
   }
 }
 </script>
@@ -1623,6 +1564,65 @@ flowchart TD
 <script>
   var INITIAL_ZOOM = 1.2;
 
+  // Build enriched tooltip HTML from a tooltip info object.
+  // Fields: title, desc, ref (always), status?, indicators?, indicators_met?,
+  //         indicators_total?, failure_teaser? (auto-enriched).
+  function buildTooltipHTML(info) {
+    var h = '<strong>';
+    if (info.status) {
+      h += '<span class="tt-status st-' + info.status + '"></span>';
+    }
+    h += info.title + '</strong>';
+    h += info.desc;
+
+    // Indicator checklist
+    if (info.indicators && info.indicators.length > 0) {
+      var met = info.indicators_met || 0;
+      var total = info.indicators_total || info.indicators.length;
+      var maxShow = 4;
+      // Build display list: unmet first, then met, capped
+      var unmetList = [];
+      var metList = [];
+      for (var i = 0; i < info.indicators.length; i++) {
+        if (i < met) { metList.push(info.indicators[i]); }
+        else { unmetList.push(info.indicators[i]); }
+      }
+      // Reorder: unmet items first (they're actionable), then met
+      // But indicators array is rubric order — use met count to split
+      var ordered = [];
+      // Show unmet first (index >= met), then met (index < met)
+      for (var j = met; j < info.indicators.length && j < total; j++) {
+        ordered.push({text: info.indicators[j], isMet: false});
+      }
+      for (var k = 0; k < met && k < info.indicators.length; k++) {
+        ordered.push({text: info.indicators[k], isMet: true});
+      }
+
+      h += '<div class="tt-divider"></div><div class="tt-indicators">';
+      var shown = Math.min(ordered.length, maxShow);
+      for (var s = 0; s < shown; s++) {
+        var ind = ordered[s];
+        if (ind.isMet) {
+          h += '<div class="ind-met">\u2713 ' + ind.text + '</div>';
+        } else {
+          h += '<div class="ind-unmet">\u2717 ' + ind.text + '</div>';
+        }
+      }
+      if (ordered.length > maxShow) {
+        h += '<div class="ind-more">+' + (ordered.length - maxShow) + ' more</div>';
+      }
+      h += '</div>';
+    }
+
+    // Failure teaser
+    if (info.failure_teaser) {
+      h += '<div class="tt-teaser">\u26a0 ' + info.failure_teaser + '</div>';
+    }
+
+    if (info.ref) h += '<span class="tt-ref">' + info.ref + '</span>';
+    return h;
+  }
+
   // Zoom works by setting a CSS custom property on the .mermaid-wrap container.
   // The inner .mermaid / svg element uses transform: scale(var(--diagram-zoom)).
   // This avoids issues with CSS zoom not applying to SVG elements.
@@ -1654,12 +1654,23 @@ flowchart TD
     svgClone.style.transform = 'none';
     svgClone.style.maxWidth = 'none';
 
+    // Grab tooltip data from the parent page if available
+    var tooltipData = null;
+    var metaId = wrap.getAttribute('data-tooltips');
+    if (metaId) {
+      var metaEl = document.getElementById(metaId);
+      if (metaEl) {
+        try { tooltipData = metaEl.textContent; } catch(e) {}
+      }
+    }
+
     var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     var bg = isDark ? '#0c0a09' : '#faf9f7';
     var text = isDark ? '#fafaf9' : '#1c1917';
     var textMuted = isDark ? '#78716c' : '#a8a29e';
     var border = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.07)';
     var surface = isDark ? '#1c1917' : '#ffffff';
+    var accent = isDark ? '#f59e0b' : '#d97706';
 
     var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
       '<title>' + titleText + '</title>' +
@@ -1675,6 +1686,21 @@ flowchart TD
       '.viewport { position: absolute; top: 53px; left: 0; right: 0; bottom: 0; overflow: auto; cursor: grab; }' +
       '.viewport.panning { cursor: grabbing; user-select: none; }' +
       '.svg-container { transform-origin: 0 0; padding: 32px; display: inline-block; min-width: 100%; min-height: 100%; }' +
+      '.svg-tooltip { position: fixed; z-index: 1000; background: ' + surface + '; border: 1px solid ' + border + '; border-radius: 10px; padding: 14px 18px; max-width: 320px; max-height: 340px; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 88%, transparent 100%); mask-image: linear-gradient(to bottom, black 88%, transparent 100%); font-size: 13px; line-height: 1.5; pointer-events: none; opacity: 0; transition: opacity 0.15s; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }' +
+      '.svg-tooltip.visible { opacity: 1; }' +
+      '.svg-tooltip strong { color: ' + accent + '; display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 14px; }' +
+      '.svg-tooltip .tt-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }' +
+      '.svg-tooltip .tt-status.st-implemented { background: #0d9488; }' +
+      '.svg-tooltip .tt-status.st-partial { background: ' + accent + '; }' +
+      '.svg-tooltip .tt-status.st-missing { background: #ef4444; }' +
+      '.svg-tooltip .tt-divider { border: none; border-top: 1px dotted ' + border + '; margin: 8px 0 6px; }' +
+      '.svg-tooltip .tt-indicators { font-size: 11px; color: ' + textMuted + '; line-height: 1.7; }' +
+      '.svg-tooltip .tt-indicators .ind-met { color: #0d9488; }' +
+      '.svg-tooltip .tt-indicators .ind-unmet { opacity: 0.5; }' +
+      '.svg-tooltip .tt-indicators .ind-more { font-style: italic; margin-top: 2px; }' +
+      '.svg-tooltip .tt-teaser { font-size: 11px; font-style: italic; color: ' + accent + '; margin-top: 6px; }' +
+      '.svg-tooltip .tt-ref { color: ' + textMuted + '; font-family: "Fragment Mono", monospace; font-size: 11px; margin-top: 8px; display: block; }' +
+      'g.node { cursor: help; }' +
       '</style></head><body>' +
       '<div class="toolbar">' +
       '  <h1>' + titleText + '</h1>' +
@@ -1686,6 +1712,7 @@ flowchart TD
       '<div class="viewport" id="vp">' +
       '  <div class="svg-container" id="sc">' + svgClone.outerHTML + '</div>' +
       '</div>' +
+      '<div class="svg-tooltip" id="svg-tooltip"></div>' +
       '<script>' +
       'var scale = 1, sc = document.getElementById("sc"), vp = document.getElementById("vp"), lbl = document.getElementById("zoom-label");' +
       'function apply() { sc.style.transform = "scale(" + scale + ")"; lbl.textContent = Math.round(scale * 100) + "%"; }' +
@@ -1703,6 +1730,60 @@ flowchart TD
       'window.addEventListener("mousemove", function(e) { if (!panning) return; vp.scrollLeft = sl - (e.clientX - sx); vp.scrollTop = st - (e.clientY - sy); });' +
       'window.addEventListener("mouseup", function() { panning = false; vp.classList.remove("panning"); });' +
       'fit();' +
+      (tooltipData ? (
+      'var tooltipData = ' + tooltipData + ';' +
+      'function buildTooltipHTML(info) {' +
+      '  var h = "<strong>";' +
+      '  if (info.status) h += "<span class=\\"tt-status st-" + info.status + "\\"></span>";' +
+      '  h += info.title + "</strong>" + info.desc;' +
+      '  if (info.indicators && info.indicators.length > 0) {' +
+      '    var met = info.indicators_met || 0;' +
+      '    var total = info.indicators_total || info.indicators.length;' +
+      '    var ordered = [];' +
+      '    for (var j = met; j < info.indicators.length && j < total; j++) ordered.push({text: info.indicators[j], isMet: false});' +
+      '    for (var k = 0; k < met && k < info.indicators.length; k++) ordered.push({text: info.indicators[k], isMet: true});' +
+      '    h += "<div class=\\"tt-divider\\"></div><div class=\\"tt-indicators\\">";' +
+      '    var maxShow = 4;' +
+      '    for (var s = 0; s < Math.min(ordered.length, maxShow); s++) {' +
+      '      h += ordered[s].isMet ? "<div class=\\"ind-met\\">\\u2713 " + ordered[s].text + "</div>" : "<div class=\\"ind-unmet\\">\\u2717 " + ordered[s].text + "</div>";' +
+      '    }' +
+      '    if (ordered.length > maxShow) h += "<div class=\\"ind-more\\">+" + (ordered.length - maxShow) + " more</div>";' +
+      '    h += "</div>";' +
+      '  }' +
+      '  if (info.failure_teaser) h += "<div class=\\"tt-teaser\\">\\u26a0 " + info.failure_teaser + "</div>";' +
+      '  if (info.ref) h += "<span class=\\"tt-ref\\">" + info.ref + "</span>";' +
+      '  return h;' +
+      '}' +
+      'var tooltip = document.getElementById("svg-tooltip");' +
+      'var svgEl = sc.querySelector("svg");' +
+      'if (svgEl && tooltip) {' +
+      '  svgEl.querySelectorAll("g.node").forEach(function(node) {' +
+      '    var rawId = node.id || "";' +
+      '    var match = rawId.match(/^flowchart-(.+?)-\\d+$/);' +
+      '    if (!match) return;' +
+      '    var nodeId = match[1];' +
+      '    if (!tooltipData[nodeId]) return;' +
+      '    var info = tooltipData[nodeId];' +
+      '    node.addEventListener("mouseenter", function(e) {' +
+      '      tooltip.innerHTML = buildTooltipHTML(info);' +
+      '      var rect = node.getBoundingClientRect();' +
+      '      var tipX = rect.left + rect.width / 2;' +
+      '      var tipY = rect.top - 8;' +
+      '      tooltip.style.left = tipX + "px";' +
+      '      tooltip.style.top = tipY + "px";' +
+      '      tooltip.style.transform = "translate(-50%, -100%)";' +
+      '      if (tipY - 120 < 0) {' +
+      '        tooltip.style.top = (rect.bottom + 8) + "px";' +
+      '        tooltip.style.transform = "translate(-50%, 0)";' +
+      '      }' +
+      '      tooltip.classList.add("visible");' +
+      '    });' +
+      '    node.addEventListener("mouseleave", function() {' +
+      '      tooltip.classList.remove("visible");' +
+      '    });' +
+      '  });' +
+      '}'
+      ) : '') +
       '</scr' + 'ipt></body></html>';
 
     var w = window.open('', '_blank', 'width=1200,height=800');
@@ -1796,9 +1877,7 @@ flowchart TD
         var info = data[nodeId];
 
         node.addEventListener('mouseenter', function(e) {
-          var html = '<strong>' + info.title + '</strong>' + info.desc;
-          if (info.ref) html += '<span class="tt-ref">' + info.ref + '</span>';
-          tooltip.innerHTML = html;
+          tooltip.innerHTML = buildTooltipHTML(info);
 
           var rect = node.getBoundingClientRect();
           var tipX = rect.left + rect.width / 2;

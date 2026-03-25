@@ -2,7 +2,7 @@
 
 **Architecture consulting for multi-agent systems, grounded in the textbook.**
 
-Iconsult is an MCP server that reviews your multi-agent architecture against a knowledge graph of 141 concepts and 462 relationships extracted from *Agentic Architectural Patterns for Building Multi-Agent Systems* (Arsanjani & Bustos, Packt 2026). Every recommendation comes with chapter numbers, page references, and concrete code-level changes — not abstract advice.
+Iconsult is an MCP server that reviews your multi-agent architecture against a [knowledge graph](https://marcus-waldman.github.io/Iconsult_mcp/) of 141 concepts and 462 relationships extracted from [*Agentic Architectural Patterns for Building Multi-Agent Systems*](https://www.packtpub.com/en-us/product/agentic-architectural-patterns-for-building-multi-agent-systems-9781806029570) (Arsanjani & Bustos, Packt 2026). Every recommendation comes with chapter numbers, page references, and concrete code-level changes — not abstract advice.
 
 ## See It In Action
 
@@ -38,17 +38,17 @@ flowchart TD
 
 ### What Iconsult found
 
-Solid foundation — and Iconsult's knowledge graph traversal identified key opportunities across 7 categories:
+Solid foundation — and Iconsult's [knowledge graph](https://marcus-waldman.github.io/Iconsult_mcp/) traversal identified key opportunities across 7 categories:
 
-| Category | Status | Key Opportunities |
-|----------|--------|-------------------|
-| Coordination | Established | Already strong — Orchestrator, Planner-Worker, Agent Delegation all in place |
-| Explainability | Not Started | Basic Audit Logging, Instruction Fidelity Auditing, Causal Dependency Graph |
-| Robustness | Not Started | Watchdog Timeout, Retry + Prompt Mutation, Incremental Checkpointing, Fallback Model |
-| Human-Agent Interaction | Not Started | Human Calls Agent, Agent Calls Human, Agent Calls Proxy Agent |
-| Agent Capabilities | Not Started | Custom Evaluation Metrics, Hybrid Planner+Scorer, Shared Epistemic Memory |
-| Infrastructure | Not Started | Agent Auth & Registry, Event-Driven Reactivity |
-| Continuous Improvement | Not Started | Preference-Controlled Synthetic Data, Advanced RAG |
+| Category | Rating | Key Finding |
+|----------|--------|-------------|
+| Coordination & Planning | Established | Solid supervisor + agent-as-tool delegation |
+| Human-Agent Interaction | Emerging | Agent delegation works; no HITL checkpoints |
+| Agent Capabilities | Emerging | WebSearchTool + structured outputs in place |
+| Robustness | Not Started | 0% failure chain coverage; no retry, no timeout |
+| Explainability | Not Started | No instruction anchoring or fidelity auditing |
+| Infrastructure | Not Started | No event system, no auth, no registry |
+| Continuous Improvement | Not Started | Verification is informational only |
 
 ### Recommended architecture
 
@@ -94,11 +94,11 @@ The consultation followed Iconsult's guided workflow:
 
 1. **Read the codebase** — Fetched all source files from `manager.py`, `agents/*.py`. Identified the orchestrator pattern in `FinancialResearchManager`, the `.as_tool()` composition, the broad `except Exception: return None` in search, and the terminal verifier.
 
-2. **Match concepts** — `match_concepts` embedded the project description and deterministically ranked the most relevant patterns: Orchestrator, Planner-Worker, Agent Delegates to Agent, Tool Use, and Supervisor.
+2. **Match concepts** — `match_concepts` embedded the project description and deterministically ranked the most relevant patterns: Multi-Agent Planning, Supervisor Architecture, Agent Delegates to Agent, AgentTool, and Hybrid Planner+Scorer.
 
-2b. **Plan** — `plan_consultation` assessed complexity and generated an adaptive plan — how many concepts to traverse, whether to use subagents, and which critique steps to include.
+2b. **Plan** — `plan_consultation` assessed complexity as **complex** (score 86/100 — 20 concepts matched, high relationship density) and generated an 11-step adaptive plan with scatter-gather traversal, two rounds of graph exploration, and critique.
 
-3. **Traverse the graph** — `get_subgraph` explored each seed concept's neighborhood. The `requires` edges revealed that the Supervisor pattern *requires* Auto-Healing — an opportunity not yet in place. The `complements` edges surfaced Hybrid Planner+Scorer as a natural addition. `log_pattern_assessment` recorded each finding for deterministic scoring.
+3. **Traverse the graph** — 4 parallel subagents explored concept clusters via `get_subgraph`, discovering 39 nodes and 45 edges across two traversal rounds. `log_pattern_assessment` recorded 20 assessments (7 implemented, 3 partial, 7 missing, 3 not applicable). Key discovery: the verification feedback loop gap blocks the entire self-correction → self-improvement path.
 
 4. **Retrieve book passages** — `ask_book` scoped to the discovered concepts returned exact citations: chapter numbers, page ranges, and quotes grounding each recommendation.
 
@@ -106,7 +106,7 @@ The consultation followed Iconsult's guided workflow:
 
 ## What It Does
 
-Point it at a codebase (or describe your architecture), and it runs a structured consultation: matching concepts, traversing the knowledge graph for prerequisites and conflicts, scoring maturity against a category-based rubric (7 categories × 3 levels from Ch. 12), and generating an interactive HTML review with before/after architecture diagrams.
+Point it at a codebase (or describe your architecture), and it runs a structured consultation: matching concepts, traversing the [knowledge graph](https://marcus-waldman.github.io/Iconsult_mcp/) for prerequisites and conflicts, scoring maturity against a category-based rubric (7 categories × 3 levels from Ch. 12), and generating an interactive HTML review with before/after architecture diagrams.
 
 ### Tools (25)
 
@@ -144,7 +144,7 @@ Point it at a codebase (or describe your architecture), and it runs a structured
 | `rate_consultation` | Record user quality score (1-5) and/or feedback with metadata snapshot |
 | `consultation_analytics` | Surface quality trends across consultations (avg rating, coverage, distribution) |
 | `list_concepts` | Browse/filter the full 138-concept catalogue |
-| `validate_subagent` | Schema validation for subagent responses; optional semantic validation against the knowledge graph |
+| `validate_subagent` | Schema validation for subagent responses; optional semantic validation against the [knowledge graph](https://marcus-waldman.github.io/Iconsult_mcp/) |
 | `health_check` | Server health + graph stats |
 
 ### Prompt
@@ -159,7 +159,23 @@ Point it at a codebase (or describe your architecture), and it runs a structured
 141 concepts  ·  786 sections  ·  462 relationships  ·  1,248 concept-section mappings
 ```
 
-Relationship types span `uses`, `extends`, `alternative_to`, `component_of`, `requires`, `enables`, `complements`, `specializes`, `precedes`, and `conflicts_with` — discovered through five extraction phases including cross-chapter semantic analysis.
+Relationship types span `uses`, `extends`, `alternative_to`, `component_of`, `requires`, `enables`, `complements`, `specializes`, `precedes`, and `conflicts_with`.
+
+#### How it was built
+
+The graph was extracted from the book in 4 phases using Claude and OpenAI embeddings:
+
+| Phase | What it does | Output |
+|-------|-------------|--------|
+| **1a — Parse Index** | Extract concept entries from the book's index (OCR-corrected) | 138 concepts with page references |
+| **1b — Parse Book** | Segment the book into sections by heading structure | 786 sections across 16 chapters |
+| **2 — Tag Concepts** | Claude maps each concept to relevant sections using index page numbers + semantic context | 1,248 concept-section mappings |
+| **3a — Explicit Relationships** | Claude identifies relationships between concepts within each chapter | Typed edges (uses, requires, extends, etc.) |
+| **3b — Semantic Pairs** | OpenAI embeddings find similar concepts across chapters; Claude validates and types the relationship | Cross-chapter semantic edges |
+| **3c–3e — Cross-Chapter** | Three additional passes: knowledge-based, cross-chapter semantic, and summary-based structural relationships | 462 total relationships at avg 0.695 confidence |
+| **4 — Build Graph** | Deduplicate edges, validate confidence thresholds, compute final embeddings from section content | Production-ready graph on MotherDuck |
+
+See [`docs/development.md`](docs/development.md) for pipeline commands and technical details.
 
 **[Explore the interactive knowledge graph →](https://marcus-waldman.github.io/Iconsult_mcp/)**
 
@@ -174,7 +190,7 @@ Relationship types span `uses`, `extends`, `alternative_to`, `component_of`, `re
 
 ### Database Access
 
-The knowledge graph is hosted on MotherDuck and shared publicly. The server automatically detects whether you own the database or need to attach the public share — no extra configuration needed. Just provide your MotherDuck token and it works.
+The [knowledge graph](https://marcus-waldman.github.io/Iconsult_mcp/) is hosted on MotherDuck and shared publicly. The server automatically detects whether you own the database or need to attach the public share — no extra configuration needed. Just provide your MotherDuck token and it works.
 
 ### Install visual-explainer (optional)
 
