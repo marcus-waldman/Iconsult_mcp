@@ -4,6 +4,8 @@
 
 Iconsult is an MCP server that reviews your multi-agent architecture against a [knowledge graph](https://marcus-waldman.github.io/Iconsult_mcp/) of 141 concepts and 462 relationships extracted from [*Agentic Architectural Patterns for Building Multi-Agent Systems*](https://www.packtpub.com/en-us/product/agentic-architectural-patterns-for-building-multi-agent-systems-9781806029570) (Arsanjani & Bustos, Packt 2026). Every recommendation comes with chapter numbers, page references, and concrete code-level changes — not abstract advice.
 
+This project was influenced by Piaget's theories of cognitive development in which learning occurs through the [adaptation of schemas](https://marcus-waldman.github.io/Iconsult_mcp/piaget-schema-adaptation.png).
+
 ## See It In Action
 
 We pointed Iconsult at OpenAI's [Financial Research Agent](https://github.com/openai/openai-agents-python/tree/main/examples/financial_research_agent) — a 5-stage multi-agent pipeline from their Agents SDK — and asked it to assess architectural maturity.
