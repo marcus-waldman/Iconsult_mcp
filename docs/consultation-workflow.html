@@ -234,6 +234,16 @@
     font-weight: 600;
   }
 
+  .desc a {
+    color: var(--blue);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .desc a:hover {
+    color: var(--teal);
+  }
+
   .desc code {
     font-family: var(--font-mono);
     font-size: 18px;
@@ -289,7 +299,7 @@
         <span class="badge badge-det">Deterministic</span>
       </div>
       <div class="tools"><span class="tool">match_concepts</span></div>
-      <p class="desc">Embedded project description (<strong>text-embedding-3-small</strong>) and ranked all <strong>141 concepts</strong> by cosine similarity against pre-computed KG embeddings. Same input → same ranking — <strong>no LLM</strong>.</p>
+      <p class="desc">Embedded project description (<strong>text-embedding-3-small</strong>) and ranked all <strong>141 concepts</strong> by cosine similarity against pre-computed <a href="https://marcus-waldman.github.io/Iconsult_mcp/" target="_blank" rel="noopener">KG</a> embeddings. Same input → same ranking — <strong>no LLM</strong>.</p>
     </div>
   </div>
 
