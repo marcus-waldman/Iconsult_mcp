@@ -90,19 +90,19 @@ flowchart TD
 
 ### How it got there
 
-The consultation followed Iconsult's guided workflow:
+The consultation followed Iconsult's 7-step guided workflow:
 
-1. **Read the codebase** — Fetched all source files from `manager.py`, `agents/*.py`. Identified the orchestrator pattern in `FinancialResearchManager`, the `.as_tool()` composition, the broad `except Exception: return None` in search, and the terminal verifier.
-
-2. **Match concepts** — `match_concepts` embedded the project description and deterministically ranked the most relevant patterns: Multi-Agent Planning, Supervisor Architecture, Agent Delegates to Agent, AgentTool, and Hybrid Planner+Scorer.
-
-2b. **Plan** — `plan_consultation` assessed complexity as **complex** (score 86/100 — 20 concepts matched, high relationship density) and generated an 11-step adaptive plan with scatter-gather traversal, two rounds of graph exploration, and critique.
-
-3. **Traverse the graph** — 4 parallel subagents explored concept clusters via `get_subgraph`, discovering 39 nodes and 45 edges across two traversal rounds. `log_pattern_assessment` recorded 20 assessments (7 implemented, 3 partial, 7 missing, 3 not applicable). Key discovery: the verification feedback loop gap blocks the entire self-correction → self-improvement path.
-
-4. **Retrieve book passages** — `ask_book` scoped to the discovered concepts returned exact citations: chapter numbers, page ranges, and quotes grounding each recommendation.
-
-5. **Score + stress test + synthesize** — `score_architecture` computed the maturity scorecard from logged assessments. `generate_failure_scenarios` produced concrete resilience scenarios for each opportunity — illustrating how the architecture responds under stress and where it would benefit from additional patterns. Then `render_report` generated the [interactive before/after architecture diagram](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) server-side — pulling scores, scenarios, and coverage from the database and merging with narrative content to produce the complete HTML report with zoom controls, SVG tooltips, and animations. All recommended patterns are complementary — no conflicts detected.
+| Step | Tool(s) | What happened |
+|------|---------|---------------|
+| 1. **Read codebase** | — | Fetched `manager.py`, `agents/*.py`. Identified the orchestrator pattern, `.as_tool()` delegation, silent `except Exception: return None`, and terminal verifier. |
+| 2. **Match concepts** | `match_concepts` | Embedded the project description → deterministic ranking. Top hits: Multi-Agent Planning, Supervisor Architecture, Agent Delegates to Agent, AgentTool, Hybrid Planner+Scorer. Created `consultation_id` for session tracking. |
+| 2b. **Plan** | `plan_consultation` | Assessed complexity as **complex** (score 86/100 — 20 concepts, high relationship density). Generated 11-step adaptive plan. |
+| 3. **Traverse graph** | `get_subgraph`, `log_pattern_assessment`, `emit_event` | 4 parallel subagents explored concept clusters across two traversal rounds (39 nodes, 45 edges). Logged 20 pattern assessments (7 implemented, 3 partial, 7 missing, 3 N/A). Emitted `gap_found` events for key opportunities. |
+| 4. **Retrieve passages** | `ask_book` | Book passages scoped to discovered concepts — returned chapter numbers, page ranges, and quotes grounding each recommendation. |
+| 5. **Coverage + Score + Stress test** | `consultation_report`, `score_architecture`, `generate_failure_scenarios` | Verified concept coverage, computed 7-category maturity scorecard, generated 5 failure scenario walkthroughs for missing patterns. |
+| 5b. **Critique** | `critique_consultation` | Deterministic quality critique flagged 2 issues; backfilled 6 unexplored concepts via additional `get_subgraph` calls. |
+| 6. **Render report** | `render_report` | Generated the [interactive HTML report](https://marcus-waldman.github.io/Iconsult_mcp/openai-financial-agent-review.html) server-side — scores, scenarios, and coverage pulled from DB, merged with narrative content. |
+| 7. **Implementation plan** | `generate_implementation_plan` | Offered step-by-step phased checklist (mechanical code changes vs. design decisions). |
 
 ## What It Does
 
