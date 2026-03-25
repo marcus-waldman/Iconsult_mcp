@@ -90,7 +90,7 @@ flowchart TD
 
 ### How it got there
 
-The consultation followed Iconsult's 7-step guided workflow:
+The consultation followed Iconsult's 7-step guided workflow — **[view the visual workflow →](https://marcus-waldman.github.io/Iconsult_mcp/consultation-workflow.html)**
 
 | Step | Tool(s) | What happened |
 |------|---------|---------------|

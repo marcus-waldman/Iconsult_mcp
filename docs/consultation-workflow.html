@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Iconsult — Consultation Workflow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700;800&family=Fragment+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-body: 'Bricolage Grotesque', system-ui, sans-serif;
+    --font-mono: 'Fragment Mono', 'SF Mono', Consolas, monospace;
+
+    --bg: #0f1219;
+    --surface: #171d28;
+    --surface-2: #1e2636;
+    --border: rgba(255,255,255,0.06);
+    --border-bright: rgba(255,255,255,0.12);
+    --text: #e8ecf4;
+    --text-dim: #7e8a9e;
+
+    --blue: #4da3ff;
+    --blue-dim: rgba(77,163,255,0.10);
+    --green: #3fbf6f;
+    --green-dim: rgba(63,191,111,0.10);
+    --amber: #e5a530;
+    --amber-dim: rgba(229,165,48,0.10);
+    --purple: #a78bfa;
+    --purple-dim: rgba(167,139,250,0.10);
+    --teal: #2dd4bf;
+    --teal-dim: rgba(45,212,191,0.10);
+    --rose: #f0665c;
+    --rose-dim: rgba(240,102,92,0.10);
+    --slate: #94a3b8;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f0f2f5;
+      --surface: #ffffff;
+      --surface-2: #f7f8fa;
+      --border: rgba(0,0,0,0.07);
+      --border-bright: rgba(0,0,0,0.14);
+      --text: #1a1e2c;
+      --text-dim: #6b7488;
+      --blue: #2563eb;
+      --blue-dim: rgba(37,99,235,0.08);
+      --green: #16a34a;
+      --green-dim: rgba(22,163,74,0.08);
+      --amber: #ca8a04;
+      --amber-dim: rgba(202,138,4,0.08);
+      --purple: #7c3aed;
+      --purple-dim: rgba(124,58,237,0.08);
+      --teal: #0d9488;
+      --teal-dim: rgba(13,148,136,0.08);
+      --rose: #dc2626;
+      --rose-dim: rgba(220,38,38,0.08);
+      --slate: #64748b;
+    }
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse at 30% 0%, var(--blue-dim) 0%, transparent 50%),
+      radial-gradient(ellipse at 70% 100%, var(--teal-dim) 0%, transparent 40%);
+    color: var(--text);
+    font-family: var(--font-body);
+    padding: 28px 24px;
+    min-height: 100vh;
+    max-width: 720px;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; }
+  }
+
+  h1 {
+    font-size: 38px;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.5px;
+    line-height: 1.15;
+    margin-bottom: 2px;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  .subtitle {
+    font-size: 20px;
+    color: var(--text-dim);
+    margin-bottom: 28px;
+    line-height: 1.4;
+    animation: fadeUp 0.4s ease 0.05s both;
+  }
+
+  /* ── Steps ── */
+  .workflow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+
+  /* Vertical connector line */
+  .workflow::before {
+    content: '';
+    position: absolute;
+    left: 27px;
+    top: 28px;
+    bottom: 28px;
+    width: 2px;
+    background: linear-gradient(to bottom,
+      var(--blue) 0%, var(--green) 15%, var(--amber) 28%,
+      var(--purple) 42%, var(--teal) 56%, var(--rose) 70%,
+      var(--green) 82%, var(--blue) 90%, var(--amber) 100%);
+    opacity: 0.3;
+    border-radius: 1px;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: 54px 1fr;
+    gap: 0;
+    position: relative;
+    animation: fadeUp 0.35s ease calc(var(--i) * 0.06s) both;
+    padding: 6px 0;
+  }
+
+  .step-num {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 12px;
+    z-index: 1;
+  }
+
+  .step-num span {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -0.3px;
+  }
+
+  .step-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    transition: border-color 0.2s;
+  }
+
+  .step-card:hover {
+    border-color: var(--border-bright);
+  }
+
+  .step-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+
+  .step-name {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.2px;
+  }
+
+  .badge {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px 9px;
+    border-radius: 4px;
+  }
+
+  .badge-det {
+    background: var(--green-dim);
+    color: var(--green);
+  }
+
+  .badge-llm {
+    background: var(--purple-dim);
+    color: var(--purple);
+  }
+
+  .badge-hybrid {
+    background: var(--amber-dim);
+    color: var(--amber);
+  }
+
+  .tools {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+
+  .tool {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    padding: 3px 9px;
+    border-radius: 5px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+
+  .desc {
+    font-size: 22px;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .desc strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .desc code {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--blue);
+  }
+
+  .insight {
+    margin-top: 6px;
+    padding: 5px 10px;
+    border-left: 3px solid var(--amber);
+    background: var(--amber-dim);
+    border-radius: 0 6px 6px 0;
+    font-size: 20px;
+    color: var(--amber);
+    line-height: 1.45;
+  }
+
+  /* ── Step colors ── */
+  .c-blue .step-num span { background: var(--blue); }
+  .c-green .step-num span { background: var(--green); }
+  .c-amber .step-num span { background: var(--amber); }
+  .c-purple .step-num span { background: var(--purple); }
+  .c-teal .step-num span { background: var(--teal); }
+  .c-rose .step-num span { background: var(--rose); }
+</style>
+</head>
+<body>
+
+<h1>Consultation Workflow</h1>
+<p class="subtitle">Iconsult's 7-step guided architecture review — applied to OpenAI's Financial Research Agent</p>
+
+<div class="workflow">
+
+  <div class="step c-blue" style="--i:1">
+    <div class="step-num"><span>1</span></div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-name">Read Codebase</span>
+        <span class="badge badge-llm">LLM</span>
+      </div>
+      <p class="desc">Fetched <code>manager.py</code>, <code>agents/*.py</code>. Identified orchestrator pattern, <code>.as_tool()</code> delegation, silent <code>except Exception: return None</code>, and terminal verifier.</p>
+    </div>
+  </div>
+
+  <div class="step c-green" style="--i:2">
+    <div class="step-num"><span>2</span></div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-name">Match Concepts</span>
+        <span class="badge badge-det">Deterministic</span>
+      </div>
+      <div class="tools"><span class="tool">match_concepts</span></div>
+      <p class="desc">Embedded project description (<strong>text-embedding-3-small</strong>) and ranked all <strong>141 concepts</strong> by cosine similarity against pre-computed KG embeddings. Same input → same ranking — <strong>no LLM</strong>.</p>
+    </div>
+  </div>
+
+  <div class="step c-amber" style="--i:3">
+    <div class="step-num"><span>2b</span></div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-name">Plan</span>
+        <span class="badge badge-det">Deterministic</span>
+      </div>
+      <div class="tools"><span class="tool">plan_consultation</span></div>
+      <p class="desc">Assessed complexity as <strong>complex</strong> (86/100). Controls depth: <strong>simple</strong> (3 concepts, 1 hop) → <strong>moderate</strong> (5, 2 hops, optional critique) → <strong>complex</strong> (8, parallel subagents, 2nd traversal, mandatory critique).</p>
+    </div>
+  </div>
+
+  <div class="step c-purple" style="--i:4">
+    <div class="step-num"><span>3</span></div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-name">Traverse Graph</span>
+        <span class="badge badge-hybrid">LLM + Tools</span>
+      </div>
+      <div class="tools">
+        <span class="tool">get_subgraph</span>
+        <span class="tool">log_pattern_assessment</span>
+        <span class="tool">emit_event</span>
+      </div>
+      <p class="desc"><strong>4 parallel subagents</strong>, 2 traversal rounds (<strong>39 nodes, 45 edges</strong>). Logged <strong>20 pattern assessments</strong> (7 implemented, 3 partial, 7 missing, 3 N/A).</p>
+      <div class="insight">💡 Key discovery: verification feedback loop gap blocks entire self-correction → self-improvement path</div>
+    </div>
+  </div>
+
+  <div class="step c-teal" style="--i:5">
+    <div class="step-num"><span>4</span></div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-name">Retrieve Passages</span>
+        <span class="badge badge-hybrid">RAG</span>
+      </div>
+      <div class="tools"><span class="tool">ask_book</span></div>
+      <p class="desc">Scoped to discovered concepts — returned exact <strong>chapter numbers, page ranges, and quotes</strong>. Follow-up questions generated deterministically from graph edge templates.</p>
+    </div>
+  </div>
+
+  <div class="step c-rose" style="--i:6">
+    <div class="step-num"><span>5</span></div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-name">Coverage + Score + Stress Test</span>
+        <span class="badge badge-det">Deterministic</span>
+      </div>
+      <div class="tools">
+        <span class="tool">consultation_report</span>
+        <span class="tool">score_architecture</span>
+        <span class="tool">generate_failure_scenarios</span>
+      </div>
+      <p class="desc"><strong>4 coverage dimensions</strong> (concept, relationship type, passage diversity, critical edges). <strong>7-category maturity scorecard</strong>. <strong>5 failure walkthroughs</strong> for missing patterns.</p>
+    </div>
+  </div>
+
+  <div class="step c-green" style="--i:7">
+    <div class="step-num"><span>5b</span></div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-name">Critique</span>
+        <span class="badge badge-det">Deterministic</span>
+      </div>
+      <div class="tools"><span class="tool">critique_consultation</span></div>
+      <p class="desc"><strong>No LLM</strong> — 7 rule-based checks against fixed thresholds (workflow completeness, traversal ≥ 3, assessments ≥ 5, coverage ≥ 50%, critical edges). Flagged 2 issues; backfilled 6 concepts.</p>
+    </div>
+  </div>
+
+  <div class="step c-blue" style="--i:8">
+    <div class="step-num"><span>6</span></div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-name">Render Report</span>
+        <span class="badge badge-hybrid">Template</span>
+      </div>
+      <div class="tools"><span class="tool">render_report</span></div>
+      <p class="desc">Server-side HTML — scores, scenarios, and coverage from DB merged with Claude-provided narrative (<strong>~1700 tokens</strong>). Full CSS/JS/zoom/tooltips baked in.</p>
+    </div>
+  </div>
+
+  <div class="step c-amber" style="--i:9">
+    <div class="step-num"><span>7</span></div>
+    <div class="step-card">
+      <div class="step-header">
+        <span class="step-name">Implementation Plan</span>
+        <span class="badge badge-det">Deterministic</span>
+      </div>
+      <div class="tools"><span class="tool">generate_implementation_plan</span></div>
+      <p class="desc">Phased checklist classifying each step as <strong>mechanical</strong> (concrete code change) or <strong>design decision</strong> (architectural choice). Persisted in DB for cross-session tracking.</p>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
