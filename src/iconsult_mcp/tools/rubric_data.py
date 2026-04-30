@@ -574,8 +574,23 @@ ALL_PATTERN_IDS: set[str] = {
 
 
 def normalize_pattern_id(pid: str) -> str:
-    """Resolve aliases to canonical rubric ID."""
-    return _PATTERN_ID_ALIASES.get(pid, pid)
+    """Resolve aliases to canonical rubric ID.
+
+    Multi-book aware: if `pid` carries a `{book_id}__` prefix (introduced in
+    Phase 1c so concept IDs don't collide across books), the prefix is
+    stripped before alias / canonical lookup. So both
+    `arsanjani_2026__supervisor_architecture` and `supervisor_architecture`
+    resolve to the same canonical rubric ID.
+    """
+    if pid in _PATTERN_ID_ALIASES:
+        return _PATTERN_ID_ALIASES[pid]
+    if "__" in pid:
+        suffix = pid.split("__", 1)[1]
+        if suffix in _PATTERN_ID_ALIASES:
+            return _PATTERN_ID_ALIASES[suffix]
+        if suffix in ALL_PATTERN_IDS:
+            return suffix
+    return pid
 
 
 def get_pattern_indicators(pattern_id: str) -> list[str]:

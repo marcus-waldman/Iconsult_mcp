@@ -476,5 +476,22 @@ CASES: list[dict] = [
     },
 ]
 
+# --- Multi-book refactor (Phase 1c) ---
+# After Phase 1c, concept IDs in the database carry a `{book_id}__` prefix to
+# avoid collisions across books. We post-process the bare slugs in
+# `expected_concepts` so each test case continues to declare its expectations
+# in the readable, unprefixed form. `pattern_id` fields are left alone — they
+# flow through `normalize_pattern_id()`, which already strips the prefix.
+_BOOK_PREFIX = "arsanjani_2026__"
+
+
+def _qualify(slug: str) -> str:
+    return slug if slug.startswith(_BOOK_PREFIX) else _BOOK_PREFIX + slug
+
+
+for _case in CASES:
+    _case["expected_concepts"] = [_qualify(c) for c in _case["expected_concepts"]]
+
+
 # Quick lookup by case ID
 CASES_BY_ID: dict[str, dict] = {c["id"]: c for c in CASES}
