@@ -26,7 +26,7 @@ from iconsult_mcp.tools.get_subgraph import get_subgraph
 from iconsult_mcp.tools.ask_book import ask_book
 from iconsult_mcp.tools.match_concepts import match_concepts
 from iconsult_mcp.tools.triage import triage_books
-from iconsult_mcp.tools.projects import list_books, start_project
+from iconsult_mcp.tools.projects import build_project_kg, list_books, start_project
 from iconsult_mcp.tools.consultation_report import consultation_report
 from iconsult_mcp.tools.log_pattern_assessment import log_pattern_assessment
 from iconsult_mcp.tools.score_architecture import score_architecture
@@ -56,6 +56,7 @@ TOOL_METADATA = {
     "triage_books": {"timeout": 30, "retryable": True, "category": "browse", "access_level": "read"},
     "list_books": {"timeout": 10, "retryable": True, "category": "browse", "access_level": "read"},
     "start_project": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "write"},
+    "build_project_kg": {"timeout": 600, "retryable": False, "category": "consultation", "access_level": "write"},
     "list_concepts": {"timeout": 15, "retryable": True, "category": "browse", "access_level": "read"},
     "get_subgraph": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
     "ask_book": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
@@ -104,6 +105,13 @@ TOOL_DISPATCH = {
         project_id=args.get("project_id"),
         triage_top_k=args.get("triage_top_k", 5),
         triage_threshold=args.get("triage_threshold", 0.4),
+    ),
+    "build_project_kg": lambda args: build_project_kg(
+        project_id=args.get("project_id", ""),
+        force=args.get("force", False),
+        auto_align=args.get("auto_align", True),
+        align_threshold=args.get("align_threshold", 0.6),
+        align_top_k=args.get("align_top_k", 5),
     ),
     "list_concepts": lambda args: list_concepts(
         search=args.get("search"),
@@ -556,6 +564,48 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["name", "project_description"],
+            },
+        ),
+        Tool(
+            name="build_project_kg",
+            description=(
+                "BUILD PROJECT KG — Build the per-project canonical layer for "
+                "an existing project. Aligns each pair of triaged books "
+                "(cosine-shortlist + Claude adjudication, cached in "
+                "concept_alignment_cache so re-runs are fast), runs union-find "
+                "over positive verdicts to cluster cross-book equivalents, "
+                "writes one canonical_concepts row per cluster (singletons "
+                "included) with role classification (supporting_evidence vs "
+                "informational_only based on rubric pattern alias hits), and "
+                "marks the project as built. Idempotent: skips when "
+                "unified_kg_built_at is already set unless `force=True`. "
+                "Returns stats and a preview sample of multi-member clusters."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "The project to build the canonical KG for",
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Rebuild even if the KG was previously built (default false)",
+                    },
+                    "auto_align": {
+                        "type": "boolean",
+                        "description": "Run alignment for any un-cached book pairs first (default true)",
+                    },
+                    "align_threshold": {
+                        "type": "number",
+                        "description": "Cosine cut for alignment shortlisting (default 0.6)",
+                    },
+                    "align_top_k": {
+                        "type": "integer",
+                        "description": "Per-side top-k for bidirectional shortlisting (default 5)",
+                    },
+                },
+                "required": ["project_id"],
             },
         ),
         Tool(
