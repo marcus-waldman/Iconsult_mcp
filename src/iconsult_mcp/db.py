@@ -345,6 +345,38 @@ def upsert_book(
     )
 
 
+def set_book_summary(
+    book_id: str,
+    summary: str,
+    summary_embedding: list[float],
+) -> None:
+    """Update `summary` and `summary_embedding` for an existing book row.
+
+    Raises KeyError if the book row does not exist (run `seed_books_table.py`
+    first). Phase 2a writer; intentionally separate from `upsert_book` so a
+    re-seed of metadata never nukes the embedding, and a re-commit of the
+    summary never nukes the metadata.
+    """
+    conn = get_connection()
+    existing = conn.execute(
+        "SELECT 1 FROM books WHERE id = ?", [book_id]
+    ).fetchone()
+    if not existing:
+        raise KeyError(
+            f"Book '{book_id}' not found in books table. "
+            "Run `py scripts/seed_books_table.py` first."
+        )
+    conn.execute(
+        """
+        UPDATE books
+           SET summary = ?,
+               summary_embedding = ?
+         WHERE id = ?
+        """,
+        [summary, summary_embedding, book_id],
+    )
+
+
 def get_book(book_id: str) -> dict | None:
     """Return the row for one book or None."""
     import json as _json
@@ -353,7 +385,8 @@ def get_book(book_id: str) -> dict | None:
     row = conn.execute(
         """
         SELECT id, title, authors, year, summary, altitude, is_oracle,
-               chapter_boundaries, created_at
+               chapter_boundaries, created_at,
+               summary_embedding IS NOT NULL AS has_summary_embedding
         FROM books
         WHERE id = ?
         """,
@@ -371,6 +404,7 @@ def get_book(book_id: str) -> dict | None:
         "is_oracle": row[6],
         "chapter_boundaries": _json.loads(row[7]) if row[7] else None,
         "created_at": row[8],
+        "has_summary_embedding": bool(row[9]),
     }
 
 

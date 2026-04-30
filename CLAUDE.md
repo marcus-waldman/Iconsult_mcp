@@ -107,6 +107,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - Phase 4: `build_graph.py` — deduplicate, validate, final embeddings (uses section content for embeddings)
 - `populate_content.py` — fills `sections.content` from book markdown (run before phase 4 re-embed)
 - `extract_indicators.py` — one-time: mines Ch. 12 + source chapters to produce `rubric_data.py` with binary indicators per pattern
+- `generate_book_summary.py --book <id> {--draft|--commit|--show}` — Phase 2a: Claude drafts a triage-oriented summary (`--draft` writes to `literature/{book_id}/summary.md`, no DB write), user reviews/edits, then `--commit` embeds it and updates `books.summary` + `books.summary_embedding` via `set_book_summary` (UPDATE, doesn't touch other columns)
 - Orchestrator: `run_pipeline.py --book <id>` — runs all phases for one book; `--reset` clears that book's metadata only
 
 ## Notes
