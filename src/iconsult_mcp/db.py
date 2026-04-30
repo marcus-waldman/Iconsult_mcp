@@ -311,6 +311,95 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
     logger.info("Schema initialized successfully")
 
 
+# --- Books registry helpers --------------------------------------------------
+
+
+def upsert_book(
+    book_id: str,
+    title: str,
+    authors: str | None = None,
+    year: int | None = None,
+    altitude: str | None = None,
+    is_oracle: bool = False,
+    chapter_boundaries: dict | list | None = None,
+    summary: str | None = None,
+) -> None:
+    """Insert or replace a row in the `books` corpus catalogue.
+
+    `summary_embedding` is left untouched (Phase 2 generates it).
+    `chapter_boundaries` is JSON-serialized.
+    """
+    import json as _json
+
+    conn = get_connection()
+    boundaries_json = (
+        _json.dumps(chapter_boundaries) if chapter_boundaries is not None else None
+    )
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO books
+            (id, title, authors, year, summary, altitude, is_oracle, chapter_boundaries)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [book_id, title, authors, year, summary, altitude, is_oracle, boundaries_json],
+    )
+
+
+def get_book(book_id: str) -> dict | None:
+    """Return the row for one book or None."""
+    import json as _json
+
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT id, title, authors, year, summary, altitude, is_oracle,
+               chapter_boundaries, created_at
+        FROM books
+        WHERE id = ?
+        """,
+        [book_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "title": row[1],
+        "authors": row[2],
+        "year": row[3],
+        "summary": row[4],
+        "altitude": row[5],
+        "is_oracle": row[6],
+        "chapter_boundaries": _json.loads(row[7]) if row[7] else None,
+        "created_at": row[8],
+    }
+
+
+def list_books() -> list[dict]:
+    """Return all rows in the `books` table."""
+    import json as _json
+
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT id, title, authors, year, altitude, is_oracle, chapter_boundaries
+        FROM books
+        ORDER BY created_at
+        """
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "title": r[1],
+            "authors": r[2],
+            "year": r[3],
+            "altitude": r[4],
+            "is_oracle": r[5],
+            "chapter_boundaries": _json.loads(r[6]) if r[6] else None,
+        }
+        for r in rows
+    ]
+
+
 # --- Query helpers ---
 
 def get_stats() -> dict:

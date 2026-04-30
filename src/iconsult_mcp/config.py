@@ -29,8 +29,71 @@ def get_anthropic_api_key() -> str | None:
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 LITERATURE_DIR = PROJECT_ROOT / "literature"
-BOOK_FILENAME = "Arsanjani and Bustos - 2026 - Agentic architectural patterns for building multi-agent systems proven.md"
-INDEX_FILENAME = "Arsanjani and Bustos - INDEX.md"
+
+
+# --- Books registry ---------------------------------------------------------
+#
+# Source of truth for ingested book metadata and on-disk file paths.
+# Each book lives under `literature/{subdir}/{book_filename, index_filename}`.
+#
+# Multi-book refactor, Phase 1b. Phase 1c will switch the per-book scripts
+# (parse_book, parse_index, tag_concepts, discover_relationships,
+# populate_content) from the BOOK_FILENAME / INDEX_FILENAME shim constants
+# below to the get_book_paths(book_id) helper.
+
+BOOKS: dict[str, dict] = {
+    "arsanjani_2026": {
+        "title": "Agentic Architectural Patterns for Building Multi-Agent Systems Proven",
+        "authors": "Arsanjani & Bustos",
+        "year": 2026,
+        "altitude": "mid_level",
+        "is_oracle": True,
+        "subdir": "arsanjani_2026",
+        "book_filename": "Arsanjani and Bustos - 2026 - Agentic architectural patterns for building multi-agent systems proven.md",
+        "index_filename": "Arsanjani and Bustos - INDEX.md",
+    },
+}
+
+
+def get_book_paths(book_id: str) -> dict[str, Path]:
+    """Resolve absolute on-disk paths for a registered book."""
+    if book_id not in BOOKS:
+        raise KeyError(
+            f"Unknown book_id '{book_id}'. Registered: {sorted(BOOKS.keys())}"
+        )
+    meta = BOOKS[book_id]
+    base = LITERATURE_DIR / meta["subdir"]
+    return {
+        "base": base,
+        "book": base / meta["book_filename"],
+        "index": base / meta["index_filename"],
+    }
+
+
+def get_book_metadata(book_id: str) -> dict:
+    """Return the full metadata dict for a registered book."""
+    if book_id not in BOOKS:
+        raise KeyError(
+            f"Unknown book_id '{book_id}'. Registered: {sorted(BOOKS.keys())}"
+        )
+    return dict(BOOKS[book_id])  # shallow copy so callers can mutate safely
+
+
+def list_registered_books() -> list[str]:
+    """Return the registered book_ids in insertion order."""
+    return list(BOOKS.keys())
+
+
+# Backward-compat shims. Existing scripts use:
+#     book_path = LITERATURE_DIR / BOOK_FILENAME
+# These constants embed the per-book subdir so that pattern keeps resolving
+# correctly to the new on-disk layout. Phase 1c will replace call sites with
+# `get_book_paths(book_id)["book"]` and similar, then these constants can be
+# deleted.
+_DEFAULT_BOOK_ID = "arsanjani_2026"
+_default_meta = BOOKS[_DEFAULT_BOOK_ID]
+BOOK_FILENAME = f"{_default_meta['subdir']}/{_default_meta['book_filename']}"
+INDEX_FILENAME = f"{_default_meta['subdir']}/{_default_meta['index_filename']}"
 
 
 # --- Database ----------------------------------------------------------------
