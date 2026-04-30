@@ -1,8 +1,11 @@
 """
-DuckDB/MotherDuck database module for the knowledge graph.
+Local DuckDB database module for the knowledge graph.
 
-Handles connection management (singleton) and schema initialization
-for all knowledge graph tables.
+Handles connection management (singleton) and schema initialization for all
+knowledge graph tables.
+
+The database is a local file (path resolved by config.get_db_path). MotherDuck
+is no longer a deployment target — see docs/multi-book-architecture-plan.md.
 """
 
 import logging
@@ -10,46 +13,23 @@ from typing import Optional
 
 import duckdb
 
-from iconsult_mcp.config import (
-    EMBEDDING_DIMENSIONS,
-    MOTHERDUCK_DATABASE,
-    MOTHERDUCK_SHARE_URL,
-    get_motherduck_token,
-)
+from iconsult_mcp.config import EMBEDDING_DIMENSIONS, get_db_path
 
 logger = logging.getLogger(__name__)
 
 _connection: Optional[duckdb.DuckDBPyConnection] = None
 _vss_available: bool = False
-_is_share: bool = False
 _step_buffer: dict[str, list[dict]] = {}
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
-    """Get or create MotherDuck DuckDB connection (singleton).
-
-    Tries to connect as the database owner first. If that fails (e.g. the
-    user doesn't own the database), falls back to attaching the public share
-    in read-only mode.
-    """
-    global _connection, _is_share
+    """Get or create the local DuckDB connection (singleton)."""
+    global _connection
     if _connection is None:
-        token = get_motherduck_token()
-        if not token:
-            raise ValueError(
-                "MOTHERDUCK_TOKEN environment variable is not set. "
-                "Get a token from https://app.motherduck.com/settings"
-            )
-        try:
-            _connection = duckdb.connect(f"md:{MOTHERDUCK_DATABASE}?motherduck_token={token}")
-            _is_share = False
-            _init_schema(_connection)
-        except Exception as e:
-            logger.info(f"Could not open database directly ({e}), attaching public share")
-            _connection = duckdb.connect(f"md:?motherduck_token={token}")
-            _connection.execute(f"ATTACH 'md:{MOTHERDUCK_SHARE_URL}'")
-            _connection.execute(f"USE {MOTHERDUCK_DATABASE}")
-            _is_share = True
+        path = get_db_path()
+        _connection = duckdb.connect(path)
+        logger.info(f"Opened local DuckDB at {path}")
+        _init_schema(_connection)
     return _connection
 
 
@@ -95,6 +75,24 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
+    # --- books: corpus catalogue (multi-book refactor, Phase 1a) ---
+    # One row per ingested book. The summary_embedding powers triage in Phase 2;
+    # is_oracle marks the book whose Ch. 12 supplies the scoring rubric.
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS books (
+            id VARCHAR PRIMARY KEY,
+            title VARCHAR NOT NULL,
+            authors VARCHAR,
+            year INTEGER,
+            summary TEXT,
+            summary_embedding FLOAT[{dims}],
+            altitude VARCHAR,
+            is_oracle BOOLEAN DEFAULT FALSE,
+            chapter_boundaries JSON,
+            created_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+
     # --- concepts: graph nodes ---
     conn.execute("""
         CREATE TABLE IF NOT EXISTS concepts (
@@ -105,6 +103,14 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
             page_references INTEGER[]
         )
     """)
+
+    # Migrate: add book_id column if missing (multi-book refactor, Phase 1a).
+    # Initially nullable; populated by the rebuilt pipeline in Stage 1c.
+    try:
+        conn.execute("ALTER TABLE concepts ADD COLUMN book_id VARCHAR")
+        logger.info("Added book_id column to concepts table")
+    except Exception:
+        pass  # Column already exists
 
     # --- sections: book sections ---
     conn.execute("""
@@ -126,6 +132,13 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
     try:
         conn.execute("ALTER TABLE sections ADD COLUMN content TEXT")
         logger.info("Added content column to sections table")
+    except Exception:
+        pass  # Column already exists
+
+    # Migrate: add book_id column if missing (multi-book refactor, Phase 1a)
+    try:
+        conn.execute("ALTER TABLE sections ADD COLUMN book_id VARCHAR")
+        logger.info("Added book_id column to sections table")
     except Exception:
         pass  # Column already exists
 
@@ -155,6 +168,13 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
             description TEXT
         )
     """)
+
+    # Migrate: add book_id column if missing (multi-book refactor, Phase 1a)
+    try:
+        conn.execute("ALTER TABLE relationships ADD COLUMN book_id VARCHAR")
+        logger.info("Added book_id column to relationships table")
+    except Exception:
+        pass  # Column already exists
 
     # Sync sequence with existing data
     try:
@@ -336,10 +356,25 @@ def get_stats() -> dict:
 def search_concepts_by_embedding(
     query_embedding: list[float],
     max_results: int = 10,
+    book_id: str | None = None,
 ) -> list[dict]:
-    """Search concepts by cosine similarity to a query embedding."""
+    """Search concepts by cosine similarity to a query embedding.
+
+    Args:
+        query_embedding: The query vector (1536-d).
+        max_results: Maximum results to return.
+        book_id: Optional. When provided, restrict results to concepts from
+            this book (multi-book refactor). When None, search all books.
+    """
     conn = get_connection()
     dims = EMBEDDING_DIMENSIONS
+
+    where_clause = ""
+    params: list = [query_embedding]
+    if book_id is not None:
+        where_clause = "WHERE c.book_id = ?"
+        params.append(book_id)
+    params.append(max_results)
 
     results = conn.execute(f"""
         SELECT
@@ -347,9 +382,10 @@ def search_concepts_by_embedding(
             array_cosine_similarity(ce.embedding, ?::FLOAT[{dims}]) as score
         FROM concept_embeddings ce
         JOIN concepts c ON ce.concept_id = c.id
+        {where_clause}
         ORDER BY score DESC
         LIMIT ?
-    """, [query_embedding, max_results]).fetchall()
+    """, params).fetchall()
 
     return [
         {
@@ -366,11 +402,25 @@ def search_concepts_by_embedding(
 def get_concept_relationships(
     concept_id: str,
     confidence_threshold: float = 0.0,
+    book_id: str | None = None,
 ) -> list[dict]:
-    """Get all relationships for a concept (both directions)."""
+    """Get all relationships for a concept (both directions).
+
+    Args:
+        concept_id: The concept whose edges to fetch.
+        confidence_threshold: Minimum edge confidence to return.
+        book_id: Optional. When provided, restrict to edges from this book
+            (multi-book refactor). When None, return edges across all books.
+    """
     conn = get_connection()
 
-    results = conn.execute("""
+    book_clause = ""
+    params: list = [concept_id, concept_id, confidence_threshold]
+    if book_id is not None:
+        book_clause = "AND r.book_id = ?"
+        params.append(book_id)
+
+    results = conn.execute(f"""
         SELECT
             r.id, r.from_concept_id, r.to_concept_id,
             r.relationship_type, r.confidence,
@@ -382,8 +432,9 @@ def get_concept_relationships(
         JOIN concepts ct ON r.to_concept_id = ct.id
         WHERE (r.from_concept_id = ? OR r.to_concept_id = ?)
           AND r.confidence >= ?
+          {book_clause}
         ORDER BY r.confidence DESC
-    """, [concept_id, concept_id, confidence_threshold]).fetchall()
+    """, params).fetchall()
 
     return [
         {
