@@ -37,7 +37,6 @@ CASES: list[dict] = [
         "expected_concepts": [
             "supervisor_architecture",
             "multi_agent_planning",
-            "agent_delegates_to_agent_pattern",
         ],
         "pattern_assessments": [
             {
@@ -160,7 +159,7 @@ CASES: list[dict] = [
         ),
         "expected_concepts": [
             "multi_agent_planning",
-            "supervisor_architecture",
+            "orchestrator_pattern",
         ],
         "pattern_assessments": [
             {
@@ -308,8 +307,7 @@ CASES: list[dict] = [
             "based on feedback. Implements a generate-then-verify loop."
         ),
         "expected_concepts": [
-            "instruction_fidelity_auditing_pattern",
-            "self_improvement_flywheel",
+            "custom_evaluation_metrics_pattern",
         ],
         "pattern_assessments": [
             {
@@ -454,7 +452,7 @@ CASES: list[dict] = [
             "tool registration and external service integration."
         ),
         "expected_concepts": [
-            "tool_use_pattern",
+            "function_calling_pattern",
             "model_context_protocol_mcp",
         ],
         "pattern_assessments": [

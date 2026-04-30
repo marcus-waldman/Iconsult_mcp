@@ -4,7 +4,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 
 ## Architecture
 - Python MCP server using stdio transport
-- DuckDB on MotherDuck for knowledge graph storage
+- Local DuckDB for knowledge graph storage (file path configurable via `ICONSULT_DB`)
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
@@ -20,20 +20,21 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `pip install -e .` — install in development mode
 - `iconsult-mcp` — run MCP server
 - `iconsult-mcp --check` — health check
-- `py scripts/run_pipeline.py` — run full knowledge graph pipeline
-- `py -m pytest tests/ -v` — run integration tests (requires MOTHERDUCK_TOKEN + OPENAI_API_KEY)
+- `py scripts/seed_books_table.py` — seed the `books` row(s) before first pipeline run
+- `py scripts/run_pipeline.py --book arsanjani_2026` — run full pipeline for one book (default `arsanjani_2026`)
+- `py -m pytest tests/ -v` — run integration tests (requires OPENAI_API_KEY + ANTHROPIC_API_KEY)
 - `py -m pytest tests/test_match_concepts.py -v` — run concept matching tests only
 
 ## Testing
-- Integration tests in `tests/` — require MOTHERDUCK_TOKEN and OPENAI_API_KEY env vars
+- Integration tests in `tests/` — require OPENAI_API_KEY and ANTHROPIC_API_KEY env vars
 - Test cases in `tests/cases.py` — 12 architectures derived from openai/openai-agents-python examples
 - Adding a test case = adding a dict to `CASES` in `tests/cases.py` (id, description, expected_concepts, pattern_assessments)
 - Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_implementation_plan.py` (plan generation/tracking), `test_consultation_flow.py` (end-to-end), `test_pattern_id_aliases.py` (pattern ID alias resolution), `test_blackboard.py` (blackboard knowledge hub), `test_step_buffer.py` (write-behind buffer)
 
 ## Environment Variables
-- `MOTHERDUCK_TOKEN` — required for database
 - `OPENAI_API_KEY` — required for embeddings
 - `ANTHROPIC_API_KEY` — required for extraction pipeline
+- `ICONSULT_DB` — optional local DuckDB path (default `data/iconsult.duckdb`); accepts absolute path, repo-relative path, or `:memory:`
 
 ## Config (config.py)
 - `TOOL_TIMEOUT_SECONDS` = 30 — default timeout for tool calls
@@ -41,8 +42,10 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `TOOL_RETRY_BASE_DELAY` = 1.0 — base delay for exponential backoff (delay = base × 2^attempt)
 
 ## Database
-- MotherDuck database name: `Iconsult` (override with `ICONSULT_DB` env var)
-- 12 tables + 1 metadata table (see db.py schema); `consultations` table tracks reproducible sessions; `consultation_state` for shared epistemic memory; `consultation_events` for event-driven reactivity; `implementation_plans` for cross-session plan persistence; `blackboard_facts` for typed, versioned scatter-gather coordination; `consultation_quality` for quality ratings and feedback
+- Local DuckDB file at `data/iconsult.duckdb` (override with `ICONSULT_DB`)
+- 13 tables + 1 metadata table; multi-book refactor adds `books` (corpus catalogue with summary_embedding for triage, is_oracle flag, chapter_boundaries JSON) plus `book_id` columns on `concepts` / `sections` / `relationships`
+- Concept and section IDs are `{book_id}__{slug}` namespaced; `normalize_pattern_id()` strips the prefix before alias lookup so the rubric stays book-agnostic
+- `consultations` tracks reproducible sessions; `consultation_state` shared memory; `consultation_events` reactivity; `implementation_plans` cross-session plans; `blackboard_facts` typed/versioned coordination; `consultation_quality` ratings
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
 
 ## MCP Tools
@@ -89,24 +92,25 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 7. OFFER IMPLEMENTATION PLAN — ask user if they want a step-by-step plan; if yes, `generate_implementation_plan`; recommend fresh conversation for implementation using `get_implementation_plan` + `update_plan_step`
 
 ## Literature
-- Book markdown: `literature/Arsanjani and Bustos - 2026 - ....md`
-- Index markdown: `literature/Arsanjani and Bustos - INDEX.md`
-- Both are Mathpix-extracted LaTeX-flavored markdown (uses `\section*{}` not `#`)
-- Content starts at line ~985 (Part 1); chapters marked by `\section*{N}` then `\section*{Title}`
-- Index has OCR artifacts: merged page numbers, separated name/number blocks
+- Per-book layout: `literature/{book_id}/{book.md, index.md}` (e.g., `literature/arsanjani_2026/`)
+- File names + book metadata live in `BOOKS` registry in `config.py`; resolve via `get_book_paths(book_id)`
+- Mathpix-extracted LaTeX-flavored markdown (uses `\section*{}` not `#`); index has OCR artifacts (merged page numbers, separated name/number blocks)
+- For arsanjani_2026: content starts at line ~985, chapters marked by `\section*{N}` then `\section*{Title}`
 
 ## Pipeline
-- Phase 1a: `parse_index.py` — INDEX.md → concepts table (138 concepts)
-- Phase 1b: `parse_book.py` — book → sections table (786 sections, 16 chapters)
+- Every phase script accepts `--book <book_id>` (default `arsanjani_2026`); IDs and queries are book-scoped
+- `seed_books_table.py` — seeds the `books` row(s) before any pipeline run; idempotent
+- Phase 1a: `parse_index.py` — INDEX.md → concepts table (138 concepts for arsanjani_2026)
+- Phase 1b: `parse_book.py` — book → sections table (786 sections, 16 chapters); reads `chapter_boundaries` from `books` table
 - Phase 2: `tag_concepts.py` — Claude tags concepts to sections
 - Phase 3: `discover_relationships.py` — explicit (Claude) + semantic (embeddings) relationships
 - Phase 4: `build_graph.py` — deduplicate, validate, final embeddings (uses section content for embeddings)
 - `populate_content.py` — fills `sections.content` from book markdown (run before phase 4 re-embed)
 - `extract_indicators.py` — one-time: mines Ch. 12 + source chapters to produce `rubric_data.py` with binary indicators per pattern
-- Orchestrator: `run_pipeline.py` — runs all phases, `--phase 1a` for single phase, `--reset` to clear
+- Orchestrator: `run_pipeline.py --book <id>` — runs all phases for one book; `--reset` clears that book's metadata only
 
 ## Notes
-- VSS extension may not load on MotherDuck; falls back to brute-force cosine similarity
+- VSS extension loads locally — vector search uses HNSW indexes
 - Use `py -m iconsult_mcp.server --check` to test; `py` command for Python on this system
 - Scripts use `INSERT OR REPLACE` which DuckDB supports
 - When MCP tool output is persisted to disk (too large for inline), do NOT re-read/parse the file with Bash — the data is already in context from the tool call
