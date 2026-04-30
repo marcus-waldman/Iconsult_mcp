@@ -74,3 +74,51 @@ def consultation_cleanup():
             conn.execute("DELETE FROM consultations WHERE id = ?", [cid])
         except Exception:
             pass
+
+
+@pytest.fixture()
+def project_cleanup():
+    """Track project IDs and concept_alignment_cache pairs created during a
+    test and clean them up after.
+
+    Phase 3a fixture. `register_project(pid)` removes the project row and any
+    canonical_concepts that reference it. `register_alignment(a_id, b_id)`
+    removes that single alignment-cache row (pair order doesn't matter).
+    """
+    project_ids: list[str] = []
+    alignment_pairs: list[tuple[str, str]] = []
+
+    def register_project(project_id: str) -> str:
+        project_ids.append(project_id)
+        return project_id
+
+    def register_alignment(concept_a_id: str, concept_b_id: str) -> tuple[str, str]:
+        alignment_pairs.append((concept_a_id, concept_b_id))
+        return (concept_a_id, concept_b_id)
+
+    yield register_project, register_alignment
+
+    from iconsult_mcp.db import get_connection
+
+    conn = get_connection()
+    for pid in project_ids:
+        try:
+            conn.execute("DELETE FROM canonical_concepts WHERE project_id = ?", [pid])
+        except Exception:
+            pass
+        try:
+            conn.execute("DELETE FROM projects WHERE id = ?", [pid])
+        except Exception:
+            pass
+    for a, b in alignment_pairs:
+        # Delete both orderings to be safe — writer normalizes but tests may
+        # register by either direction.
+        for ordered_a, ordered_b in [(a, b), (b, a)]:
+            try:
+                conn.execute(
+                    "DELETE FROM concept_alignment_cache "
+                    "WHERE concept_a_id = ? AND concept_b_id = ?",
+                    [ordered_a, ordered_b],
+                )
+            except Exception:
+                pass

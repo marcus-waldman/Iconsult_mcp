@@ -308,6 +308,55 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
+    # --- Phase 3a: per-project canonical layer ---------------------------------
+    # `projects` caches the triage outcome for a (name, description) pair. The
+    # unified KG (canonical_concepts) is built once per project and reused across
+    # follow-up consultations on the same project.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id VARCHAR PRIMARY KEY,
+            name VARCHAR NOT NULL,
+            description TEXT NOT NULL,
+            triaged_book_ids VARCHAR[],
+            unified_kg_built_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+
+    # `canonical_concepts` is the project-scoped alignment layer. Each row is a
+    # cluster of source concepts (from one or more triaged books) that the
+    # alignment step adjudicated as the same concept. `role` distinguishes
+    # supporting-evidence concepts (anchored to a Ch. 12 rubric pattern) from
+    # informational-only ones (enrich the consultation but never score).
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS canonical_concepts (
+            id VARCHAR PRIMARY KEY,
+            project_id VARCHAR NOT NULL,
+            name VARCHAR NOT NULL,
+            member_concept_ids VARCHAR[] NOT NULL,
+            role VARCHAR NOT NULL CHECK (role IN ('supporting_evidence', 'informational_only')),
+            rubric_pattern_id VARCHAR,
+            canonical_embedding FLOAT[{dims}]
+        )
+    """)
+
+    # `concept_alignment_cache` is global (NOT project-scoped). Two projects
+    # whose triaged book sets overlap reuse alignment verdicts from this cache,
+    # so the LLM cost of pairwise adjudication amortizes across the user base.
+    # Writer enforces canonical pair-order (concept_a.book_id < concept_b.book_id)
+    # so each pair has exactly one cache row.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS concept_alignment_cache (
+            concept_a_id VARCHAR NOT NULL,
+            concept_b_id VARCHAR NOT NULL,
+            same_concept BOOLEAN NOT NULL,
+            confidence FLOAT,
+            rationale TEXT,
+            created_at TIMESTAMP DEFAULT current_timestamp,
+            PRIMARY KEY (concept_a_id, concept_b_id)
+        )
+    """)
+
     logger.info("Schema initialized successfully")
 
 
@@ -408,18 +457,29 @@ def get_book(book_id: str) -> dict | None:
     }
 
 
-def list_books() -> list[dict]:
-    """Return all rows in the `books` table."""
+def list_books(altitude: str | None = None) -> list[dict]:
+    """Return all rows in the `books` table, optionally filtered by altitude."""
     import json as _json
 
     conn = get_connection()
-    rows = conn.execute(
-        """
-        SELECT id, title, authors, year, altitude, is_oracle, chapter_boundaries
-        FROM books
-        ORDER BY created_at
-        """
-    ).fetchall()
+    if altitude is not None:
+        rows = conn.execute(
+            """
+            SELECT id, title, authors, year, altitude, is_oracle, chapter_boundaries
+            FROM books
+            WHERE altitude = ?
+            ORDER BY created_at
+            """,
+            [altitude],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT id, title, authors, year, altitude, is_oracle, chapter_boundaries
+            FROM books
+            ORDER BY created_at
+            """
+        ).fetchall()
     return [
         {
             "id": r[0],
@@ -432,6 +492,262 @@ def list_books() -> list[dict]:
         }
         for r in rows
     ]
+
+
+# --- Project / canonical layer helpers (Phase 3a) ----------------------------
+
+
+def create_project(
+    project_id: str,
+    name: str,
+    description: str,
+    triaged_book_ids: list[str] | None = None,
+) -> None:
+    """Insert or replace a row in the `projects` cache.
+
+    `unified_kg_built_at` is left NULL — `build_project_kg` (Phase 3c) sets it
+    after a successful alignment pass.
+    """
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO projects
+            (id, name, description, triaged_book_ids, unified_kg_built_at)
+        VALUES (?, ?, ?, ?, NULL)
+        """,
+        [project_id, name, description, triaged_book_ids or []],
+    )
+
+
+def get_project(project_id: str) -> dict | None:
+    """Return one project row or None."""
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT id, name, description, triaged_book_ids,
+               unified_kg_built_at, created_at
+        FROM projects
+        WHERE id = ?
+        """,
+        [project_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "name": row[1],
+        "description": row[2],
+        "triaged_book_ids": list(row[3]) if row[3] is not None else [],
+        "unified_kg_built_at": str(row[4]) if row[4] else None,
+        "created_at": str(row[5]) if row[5] else None,
+    }
+
+
+def list_projects() -> list[dict]:
+    """Return all project rows ordered by creation time."""
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT id, name, description, triaged_book_ids,
+               unified_kg_built_at, created_at
+        FROM projects
+        ORDER BY created_at
+        """
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "name": r[1],
+            "description": r[2],
+            "triaged_book_ids": list(r[3]) if r[3] is not None else [],
+            "unified_kg_built_at": str(r[4]) if r[4] else None,
+            "created_at": str(r[5]) if r[5] else None,
+        }
+        for r in rows
+    ]
+
+
+def mark_project_kg_built(project_id: str) -> None:
+    """Set `unified_kg_built_at = now` for a project. Called by `build_project_kg`."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE projects SET unified_kg_built_at = current_timestamp WHERE id = ?",
+        [project_id],
+    )
+
+
+def upsert_canonical_concept(
+    canonical_id: str,
+    project_id: str,
+    name: str,
+    member_concept_ids: list[str],
+    role: str,
+    rubric_pattern_id: str | None = None,
+    canonical_embedding: list[float] | None = None,
+) -> None:
+    """Insert or replace a canonical concept row.
+
+    Args:
+        canonical_id: `{project_id}__{slug}` PK.
+        project_id: Owning project.
+        name: Canonical name (usually from oracle book if a member maps there).
+        member_concept_ids: Source concepts (from various books) that resolve
+            here. Must contain at least one ID.
+        role: 'supporting_evidence' or 'informational_only'.
+        rubric_pattern_id: Canonical Ch. 12 pattern ID, or None if informational.
+        canonical_embedding: Mean of member embeddings (computed by caller).
+    """
+    if role not in ("supporting_evidence", "informational_only"):
+        raise ValueError(
+            f"role must be 'supporting_evidence' or 'informational_only', got {role!r}"
+        )
+    if not member_concept_ids:
+        raise ValueError("member_concept_ids must contain at least one concept ID")
+
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO canonical_concepts
+            (id, project_id, name, member_concept_ids, role,
+             rubric_pattern_id, canonical_embedding)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            canonical_id,
+            project_id,
+            name,
+            member_concept_ids,
+            role,
+            rubric_pattern_id,
+            canonical_embedding,
+        ],
+    )
+
+
+def get_canonical_concept(canonical_id: str) -> dict | None:
+    """Return one canonical concept row or None."""
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT id, project_id, name, member_concept_ids, role,
+               rubric_pattern_id,
+               canonical_embedding IS NOT NULL AS has_embedding
+        FROM canonical_concepts
+        WHERE id = ?
+        """,
+        [canonical_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "project_id": row[1],
+        "name": row[2],
+        "member_concept_ids": list(row[3]) if row[3] is not None else [],
+        "role": row[4],
+        "rubric_pattern_id": row[5],
+        "has_embedding": bool(row[6]),
+    }
+
+
+def list_canonical_concepts(project_id: str) -> list[dict]:
+    """Return all canonical concepts for a project."""
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT id, project_id, name, member_concept_ids, role,
+               rubric_pattern_id,
+               canonical_embedding IS NOT NULL AS has_embedding
+        FROM canonical_concepts
+        WHERE project_id = ?
+        ORDER BY name
+        """,
+        [project_id],
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "project_id": r[1],
+            "name": r[2],
+            "member_concept_ids": list(r[3]) if r[3] is not None else [],
+            "role": r[4],
+            "rubric_pattern_id": r[5],
+            "has_embedding": bool(r[6]),
+        }
+        for r in rows
+    ]
+
+
+def _canonical_pair(concept_a_id: str, concept_b_id: str) -> tuple[str, str]:
+    """Return the (a, b) tuple in canonical lexicographic order.
+
+    The cache key is a single ordered pair regardless of caller direction.
+    The plan calls for `a.book_id < b.book_id`, but since concept IDs are
+    `{book_id}__{slug}` namespaced, lexicographic order on the IDs themselves
+    yields the same ordering for distinct books.
+    """
+    if concept_a_id == concept_b_id:
+        raise ValueError("Cannot align a concept with itself")
+    return (
+        (concept_a_id, concept_b_id)
+        if concept_a_id < concept_b_id
+        else (concept_b_id, concept_a_id)
+    )
+
+
+def record_alignment_decision(
+    concept_a_id: str,
+    concept_b_id: str,
+    same_concept: bool,
+    confidence: float | None = None,
+    rationale: str | None = None,
+) -> None:
+    """Record an alignment verdict for a concept pair (idempotent).
+
+    Pair is normalized to canonical order before insert, so callers may pass
+    either direction. Re-inserting overwrites the prior verdict.
+    """
+    a, b = _canonical_pair(concept_a_id, concept_b_id)
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO concept_alignment_cache
+            (concept_a_id, concept_b_id, same_concept, confidence, rationale, created_at)
+        VALUES (?, ?, ?, ?, ?, current_timestamp)
+        """,
+        [a, b, bool(same_concept), confidence, rationale],
+    )
+
+
+def get_alignment_decision(
+    concept_a_id: str,
+    concept_b_id: str,
+) -> dict | None:
+    """Return a cached alignment verdict for a concept pair, or None.
+
+    Pair is normalized to canonical order before lookup.
+    """
+    a, b = _canonical_pair(concept_a_id, concept_b_id)
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT concept_a_id, concept_b_id, same_concept, confidence,
+               rationale, created_at
+        FROM concept_alignment_cache
+        WHERE concept_a_id = ? AND concept_b_id = ?
+        """,
+        [a, b],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "concept_a_id": row[0],
+        "concept_b_id": row[1],
+        "same_concept": bool(row[2]),
+        "confidence": row[3],
+        "rationale": row[4],
+        "created_at": str(row[5]) if row[5] else None,
+    }
 
 
 # --- Query helpers ---

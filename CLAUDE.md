@@ -8,7 +8,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
-- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/triage.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`, `tools/implementation_plan.py`, `tools/blackboard.py`, `tools/quality.py`, `tools/render_report.py`, `tools/rubric_data.py`
+- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/triage.py`, `tools/projects.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`, `tools/implementation_plan.py`, `tools/blackboard.py`, `tools/quality.py`, `tools/render_report.py`, `tools/rubric_data.py`
 - L4 modules: `access_policy.py` (tool access levels + consultation ownership validation)
 - Rubric data: `rubric_data.py` holds the Ch. 12 category-based rubric (7 categories × 3 levels × 36 patterns with predefined binary indicators); extracted by `scripts/extract_indicators.py`
 - Pattern ID aliasing: `_PATTERN_ID_ALIASES` in `rubric_data.py` bridges old MATURITY_MODEL IDs / KG concept IDs → canonical rubric IDs; `normalize_pattern_id()` resolves to canonical form
@@ -29,7 +29,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - Integration tests in `tests/` — require OPENAI_API_KEY and ANTHROPIC_API_KEY env vars
 - Test cases in `tests/cases.py` — 12 architectures derived from openai/openai-agents-python examples
 - Adding a test case = adding a dict to `CASES` in `tests/cases.py` (id, description, expected_concepts, pattern_assessments)
-- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_implementation_plan.py` (plan generation/tracking), `test_consultation_flow.py` (end-to-end), `test_pattern_id_aliases.py` (pattern ID alias resolution), `test_blackboard.py` (blackboard knowledge hub), `test_step_buffer.py` (write-behind buffer)
+- Tests: `test_match_concepts.py` (concept matching quality), `test_subgraph.py` (graph traversal), `test_score_architecture.py` (scoring), `test_failure_scenarios.py` (stress test demos), `test_implementation_plan.py` (plan generation/tracking), `test_consultation_flow.py` (end-to-end), `test_pattern_id_aliases.py` (pattern ID alias resolution), `test_blackboard.py` (blackboard knowledge hub), `test_step_buffer.py` (write-behind buffer), `test_triage.py` (book triage tool), `test_projects_schema.py` (Phase 3a projects + canonical_concepts + concept_alignment_cache schema and helpers)
 
 ## Environment Variables
 - `OPENAI_API_KEY` — required for embeddings
@@ -43,7 +43,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 
 ## Database
 - Local DuckDB file at `data/iconsult.duckdb` (override with `ICONSULT_DB`)
-- 13 tables + 1 metadata table; multi-book refactor adds `books` (corpus catalogue with summary_embedding for triage, is_oracle flag, chapter_boundaries JSON) plus `book_id` columns on `concepts` / `sections` / `relationships`
+- 16 tables + 1 metadata table; multi-book refactor adds `books` (corpus catalogue with summary_embedding for triage, is_oracle flag, chapter_boundaries JSON) plus `book_id` columns on `concepts` / `sections` / `relationships`; Phase 3a adds `projects` (per-project cache with triaged_book_ids and unified_kg_built_at), `canonical_concepts` (project-scoped alignment layer with role + rubric_pattern_id + canonical_embedding), `concept_alignment_cache` (global, book-pair scoped LLM verdicts on whether two concepts are the same)
 - Concept and section IDs are `{book_id}__{slug}` namespaced; `normalize_pattern_id()` strips the prefix before alias lookup so the rubric stays book-agnostic
 - `consultations` tracks reproducible sessions; `consultation_state` shared memory; `consultation_events` reactivity; `implementation_plans` cross-session plans; `blackboard_facts` typed/versioned coordination; `consultation_quality` ratings
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
@@ -52,6 +52,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `health_check` — server health + graph scope
 - `match_concepts(project_description, max_results?, similarity_threshold?)` — ENTRY POINT: deterministic embedding match; creates `consultation_id` for session tracking; same description → same ranking
 - `triage_books(project_description, top_k=5, threshold=0.4)` — TRIAGE: deterministic cosine match against `books.summary_embedding`; ranks registered books by relevance to a project description; pure read tool, no consultation_id created; degenerate while only one book is registered
+- `list_books(altitude?)` — BROWSE: list registered books in the corpus catalogue with optional altitude filter; pure read tool
 - `list_concepts(search?, include_definitions?)` — BROWSE: compact flat list (id, name, category); use for catalogue browsing, not as consultation entry point
 - `get_subgraph(concept_ids, max_hops=2, confidence_threshold=0.5, max_edges=50, include_descriptions?, consultation_id?)` — QUERY PLANNER: priority-queue traversal; logs steps when `consultation_id` provided
 - `ask_book(question, concept_ids?, max_passages?, consultation_id?)` — DEEP CONTEXT: RAG search; returns `suggested_questions` from graph edges; logs steps when `consultation_id` provided

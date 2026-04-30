@@ -26,6 +26,7 @@ from iconsult_mcp.tools.get_subgraph import get_subgraph
 from iconsult_mcp.tools.ask_book import ask_book
 from iconsult_mcp.tools.match_concepts import match_concepts
 from iconsult_mcp.tools.triage import triage_books
+from iconsult_mcp.tools.projects import list_books
 from iconsult_mcp.tools.consultation_report import consultation_report
 from iconsult_mcp.tools.log_pattern_assessment import log_pattern_assessment
 from iconsult_mcp.tools.score_architecture import score_architecture
@@ -53,6 +54,7 @@ TOOL_METADATA = {
     "health_check": {"timeout": 10, "retryable": False, "category": "diagnostic", "access_level": "admin"},
     "match_concepts": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "write"},
     "triage_books": {"timeout": 30, "retryable": True, "category": "browse", "access_level": "read"},
+    "list_books": {"timeout": 10, "retryable": True, "category": "browse", "access_level": "read"},
     "list_concepts": {"timeout": 15, "retryable": True, "category": "browse", "access_level": "read"},
     "get_subgraph": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
     "ask_book": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
@@ -90,6 +92,9 @@ TOOL_DISPATCH = {
         project_description=args.get("project_description", ""),
         top_k=args.get("top_k", 5),
         threshold=args.get("threshold", 0.4),
+    ),
+    "list_books": lambda args: list_books(
+        altitude=args.get("altitude"),
     ),
     "list_concepts": lambda args: list_concepts(
         search=args.get("search"),
@@ -475,6 +480,27 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["project_description"],
+            },
+        ),
+        Tool(
+            name="list_books",
+            description=(
+                "BROWSE — List registered books in the corpus catalogue. "
+                "Optional altitude filter ('mid_level', 'implementation', "
+                "'strategy', 'domain'). Pure read tool, deterministic, no "
+                "consultation_id created. Use this to inspect what books are "
+                "available before triage; complements `triage_books` (which "
+                "ranks them) and `list_concepts` (which lists concepts within)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "altitude": {
+                        "type": "string",
+                        "description": "Optional altitude filter (e.g. 'mid_level')",
+                    },
+                },
+                "required": [],
             },
         ),
         Tool(
