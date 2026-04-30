@@ -26,7 +26,7 @@ from iconsult_mcp.tools.get_subgraph import get_subgraph
 from iconsult_mcp.tools.ask_book import ask_book
 from iconsult_mcp.tools.match_concepts import match_concepts
 from iconsult_mcp.tools.triage import triage_books
-from iconsult_mcp.tools.projects import list_books
+from iconsult_mcp.tools.projects import list_books, start_project
 from iconsult_mcp.tools.consultation_report import consultation_report
 from iconsult_mcp.tools.log_pattern_assessment import log_pattern_assessment
 from iconsult_mcp.tools.score_architecture import score_architecture
@@ -55,6 +55,7 @@ TOOL_METADATA = {
     "match_concepts": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "write"},
     "triage_books": {"timeout": 30, "retryable": True, "category": "browse", "access_level": "read"},
     "list_books": {"timeout": 10, "retryable": True, "category": "browse", "access_level": "read"},
+    "start_project": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "write"},
     "list_concepts": {"timeout": 15, "retryable": True, "category": "browse", "access_level": "read"},
     "get_subgraph": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
     "ask_book": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
@@ -95,6 +96,14 @@ TOOL_DISPATCH = {
     ),
     "list_books": lambda args: list_books(
         altitude=args.get("altitude"),
+    ),
+    "start_project": lambda args: start_project(
+        name=args.get("name", ""),
+        project_description=args.get("project_description", ""),
+        triaged_book_ids=args.get("triaged_book_ids"),
+        project_id=args.get("project_id"),
+        triage_top_k=args.get("triage_top_k", 5),
+        triage_threshold=args.get("triage_threshold", 0.4),
     ),
     "list_concepts": lambda args: list_concepts(
         search=args.get("search"),
@@ -501,6 +510,52 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": [],
+            },
+        ),
+        Tool(
+            name="start_project",
+            description=(
+                "START PROJECT — Create or refresh a per-project cache row. "
+                "If `triaged_book_ids` is omitted, runs `triage_books` "
+                "internally with the same description and stores the ranked "
+                "IDs above threshold. Project ID is derived deterministically "
+                "from (name, project_description) so calling twice with the "
+                "same args is idempotent. Does NOT build the unified KG — "
+                "that is `build_project_kg` (Phase 3c, pending). Returns "
+                "project_id, the full project row, and (when run) the triage "
+                "details. Subsequent consultations on the same project skip "
+                "triage and reuse the cached `triaged_book_ids`."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Human-readable project name",
+                    },
+                    "project_description": {
+                        "type": "string",
+                        "description": "Free-text project description (also used as triage signal)",
+                    },
+                    "triaged_book_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Explicit book IDs to scope to (skips internal triage)",
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional user-supplied project ID (default: hash of name + description)",
+                    },
+                    "triage_top_k": {
+                        "type": "integer",
+                        "description": "Top-k for internal triage when triaged_book_ids omitted (default 5)",
+                    },
+                    "triage_threshold": {
+                        "type": "number",
+                        "description": "Cosine threshold for internal triage (default 0.4)",
+                    },
+                },
+                "required": ["name", "project_description"],
             },
         ),
         Tool(

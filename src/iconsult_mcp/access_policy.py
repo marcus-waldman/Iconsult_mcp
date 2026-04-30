@@ -17,6 +17,7 @@ TOOL_ACCESS = {
     "health_check": "admin",
     "match_concepts": "write",
     "list_books": "read",
+    "start_project": "write",
     "list_concepts": "read",
     "get_subgraph": "read",
     "ask_book": "read",
