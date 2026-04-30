@@ -506,6 +506,9 @@ _PATTERN_ID_ALIASES: dict[str, str] = {
     "supervision_tree_with_guarded_capabilities": "supervisor_architecture",  # subsumed
     # Old failure template IDs -> rubric IDs
     "auto_healing_pattern": "auto_healing_agent_resuscitation",
+    "auto_healing": "auto_healing_agent_resuscitation",
+    "audit_trail_pattern": "basic_audit_logging",
+    "agent_specific_context_and_memory": "agent_specific_memory",
     "fallback_model_invocation_pattern": "fallback_model_invocation",
     "canary_agent_testing_pattern": "canary_agent_testing",
     "trust_decay_pattern": "trust_decay_and_scoring",
