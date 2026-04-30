@@ -301,7 +301,7 @@ Add new tests:
 
 ## Implementation Tracking
 
-**Status (as of 2026-04-30):** **Phase 1 complete.** All four sub-stages (1a–1d) shipped on `feat/multi-book-kg` and pushed to `origin`. The merge gate is satisfied: full pipeline ran end-to-end on a fresh local DuckDB and produced 138 concepts, 786 sections, 583 relationships, 138 + 786 embeddings — all `book_id='arsanjani_2026'`, all IDs prefixed. 135/135 tests pass. Ready to start **Phase 2** (triage layer) in a fresh session — see [`todo/phase-2-briefing.md`](./todo/phase-2-briefing.md).
+**Status (as of 2026-04-30):** **Phases 1 and 2 complete.** All sub-stages (1a–1d, 2a–2c) shipped on `feat/multi-book-kg` and pushed to `origin`. Phase 2 verification: `arsanjani_2026.summary` (5145 chars, hybrid Claude-draft + user edit) embedded as 1536-dim vector; `triage_books` MCP tool returns 0.4502 cosine for an obviously-relevant agentic project description and < 0.2 for off-topic ones; 142/142 tests pass. Ready to start **Phase 3** (per-project canonical layer) in a fresh session — see [`todo/phase-3-briefing.md`](./todo/phase-3-briefing.md).
 
 **Branch strategy:** Single feature branch `feat/multi-book-kg` off `main`, phase-per-commit. Merge to `main` only when all 6 phases are verified end-to-end against a real second book. Each commit's tests must pass.
 
@@ -316,11 +316,19 @@ Add new tests:
 | **1c** | `d63c5c6` | Pipeline parameterization: thread `--book <id>` through `run_pipeline.py` and all six phase scripts (`parse_index`, `parse_book`, `tag_concepts`, `discover_relationships`, `build_graph`, `populate_content`); move chapter boundaries from hardcoded `parse_book.CHAPTERS` into `books.chapter_boundaries` JSON; concept IDs become `{book_id}__{slug}` to avoid collisions when a second book lands | ✅ Pipeline runs end-to-end with `--book arsanjani_2026` |
 | **1d** | `1dd78d6` | Verification + docs: re-run full pipeline on Arsanjani with `--reset` against a local DuckDB file, confirm all 134 existing tests pass, update `CLAUDE.md` (drop MotherDuck, document local DB path) | ✅ 135/135 tests pass; CLAUDE.md current; pipeline reproducible (4 fixture updates in `tests/cases.py` to compensate for borderline embedding-ranking drift on fresh pipeline runs) |
 
+**Phase 2 sub-staging — done.** Three reviewable sub-stages on `feat/multi-book-kg`:
+
+| Stage | Commit | Scope | Verification |
+|---|---|---|---|
+| **2a** | `fd732e8` | Book-summary draft+commit script (`scripts/generate_book_summary.py`) with three modes: `--draft` (Claude generates triage-oriented summary from Ch. 1 + TOC + Ch. 12, writes to `literature/{book_id}/summary.md`, no DB write), `--commit` (embeds the finalized file via OpenAI, calls `db.set_book_summary` UPDATE), `--show` (debug). New `db.set_book_summary` helper. `.gitignore` exception for `literature/*/summary.md`. arsanjani_2026 summary: hybrid Claude-draft + user revision incorporating published-review signals (pattern template / reference framing / senior-developer audience / maturity model foregrounded) → 5145 chars / 694 words / 1536-dim embedding stored | ✅ `books.summary` length = 5145, `has_summary_embedding` = True; 135/135 tests still pass |
+| **2b** | `7e860f5` | `triage_books(project_description, top_k=5, threshold=0.4)` MCP tool: embeds description, cosine matches against `books.summary_embedding` via new `db.search_books_by_embedding` (parallels `search_concepts_by_embedding`), returns ranked book list. 4-place server registration (26 tools total, was 25). 7 new triage tests (relevance, determinism, threshold filter, top_k cap, relevance vs. off-topic, empty-input validation, response shape) | ✅ 142/142 tests pass; observed signal: agentic description → 0.4502 (above default 0.4 threshold), generic distributed-systems → 0.1894, recipe app → 0.1421 |
+| **2c** | (this commit) | Phase 2 closure: fix stale `MOTHERDUCK_TOKEN` gate in `tests/conftest.py` (now requires `OPENAI_API_KEY` + `ANTHROPIC_API_KEY`), update plan doc tracking section, write [`todo/phase-3-briefing.md`](./todo/phase-3-briefing.md) for fresh-session continuity into Phase 3 | ✅ 142/142 tests pass; conftest aligned with Phase 1 migration; Phase 3 handoff documented |
+
 ### Session continuity
 
 When resuming this work in a new session:
 
 1. Read this section first.
-2. For Phase 2 specifically, also read [`todo/phase-2-briefing.md`](./todo/phase-2-briefing.md) — full handoff with locked decisions, scope, files, and verification.
+2. For the active phase, also read the matching `todo/phase-N-briefing.md` — full handoff with locked decisions, scope, files, and verification. Phase 3 briefing lives at [`todo/phase-3-briefing.md`](./todo/phase-3-briefing.md).
 3. Check `git status` and `git log feat/multi-book-kg` to find the last completed sub-stage / commit.
-4. Phases 2–6 stay as scoped in the table above; sub-staging will be decided at the start of each phase as a briefing under `docs/todo/`.
+4. Phases 3–6 stay as scoped in the phasing table above; sub-staging is decided at the start of each phase as a briefing under `docs/todo/`.

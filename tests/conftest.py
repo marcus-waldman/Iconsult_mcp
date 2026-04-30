@@ -1,8 +1,11 @@
 """Shared fixtures for iconsult integration tests.
 
 These tests require:
-  - MOTHERDUCK_TOKEN env var (database access)
   - OPENAI_API_KEY env var (embeddings)
+  - ANTHROPIC_API_KEY env var (extraction tools that call Claude)
+
+Database is local DuckDB at `data/iconsult.duckdb` (override with ICONSULT_DB).
+The MotherDuck dependency was removed in the multi-book refactor (Phase 1a).
 
 Run with: py -m pytest tests/ -v
 """
@@ -13,8 +16,8 @@ import pytest
 
 # Skip entire test suite if credentials are missing
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("MOTHERDUCK_TOKEN") or not os.environ.get("OPENAI_API_KEY"),
-    reason="MOTHERDUCK_TOKEN and OPENAI_API_KEY required for integration tests",
+    not os.environ.get("OPENAI_API_KEY") or not os.environ.get("ANTHROPIC_API_KEY"),
+    reason="OPENAI_API_KEY and ANTHROPIC_API_KEY required for integration tests",
 )
 
 
