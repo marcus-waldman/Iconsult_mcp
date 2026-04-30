@@ -8,7 +8,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - OpenAI embeddings (text-embedding-3-small, 1536 dims) via raw urllib (no httpx)
 - Claude API for extraction tasks via raw urllib
 - `src/iconsult_mcp/` layout with hatchling build
-- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`, `tools/implementation_plan.py`, `tools/blackboard.py`, `tools/quality.py`, `tools/render_report.py`, `tools/rubric_data.py`
+- Tools: `tools/health.py`, `tools/match_concepts.py`, `tools/triage.py`, `tools/list_concepts.py`, `tools/get_subgraph.py`, `tools/ask_book.py`, `tools/consultation_report.py`, `tools/score_architecture.py`, `tools/log_pattern_assessment.py`, `tools/validate_subagent.py`, `tools/critique_consultation.py`, `tools/shared_state.py`, `tools/events.py`, `tools/plan_consultation.py`, `tools/supervise_consultation.py`, `tools/failure_scenarios.py`, `tools/implementation_plan.py`, `tools/blackboard.py`, `tools/quality.py`, `tools/render_report.py`, `tools/rubric_data.py`
 - L4 modules: `access_policy.py` (tool access levels + consultation ownership validation)
 - Rubric data: `rubric_data.py` holds the Ch. 12 category-based rubric (7 categories × 3 levels × 36 patterns with predefined binary indicators); extracted by `scripts/extract_indicators.py`
 - Pattern ID aliasing: `_PATTERN_ID_ALIASES` in `rubric_data.py` bridges old MATURITY_MODEL IDs / KG concept IDs → canonical rubric IDs; `normalize_pattern_id()` resolves to canonical form
@@ -51,6 +51,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 ## MCP Tools
 - `health_check` — server health + graph scope
 - `match_concepts(project_description, max_results?, similarity_threshold?)` — ENTRY POINT: deterministic embedding match; creates `consultation_id` for session tracking; same description → same ranking
+- `triage_books(project_description, top_k=5, threshold=0.4)` — TRIAGE: deterministic cosine match against `books.summary_embedding`; ranks registered books by relevance to a project description; pure read tool, no consultation_id created; degenerate while only one book is registered
 - `list_concepts(search?, include_definitions?)` — BROWSE: compact flat list (id, name, category); use for catalogue browsing, not as consultation entry point
 - `get_subgraph(concept_ids, max_hops=2, confidence_threshold=0.5, max_edges=50, include_descriptions?, consultation_id?)` — QUERY PLANNER: priority-queue traversal; logs steps when `consultation_id` provided
 - `ask_book(question, concept_ids?, max_passages?, consultation_id?)` — DEEP CONTEXT: RAG search; returns `suggested_questions` from graph edges; logs steps when `consultation_id` provided

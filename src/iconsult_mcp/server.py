@@ -25,6 +25,7 @@ from iconsult_mcp.tools.list_concepts import list_concepts
 from iconsult_mcp.tools.get_subgraph import get_subgraph
 from iconsult_mcp.tools.ask_book import ask_book
 from iconsult_mcp.tools.match_concepts import match_concepts
+from iconsult_mcp.tools.triage import triage_books
 from iconsult_mcp.tools.consultation_report import consultation_report
 from iconsult_mcp.tools.log_pattern_assessment import log_pattern_assessment
 from iconsult_mcp.tools.score_architecture import score_architecture
@@ -51,6 +52,7 @@ logger = logging.getLogger(__name__)
 TOOL_METADATA = {
     "health_check": {"timeout": 10, "retryable": False, "category": "diagnostic", "access_level": "admin"},
     "match_concepts": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "write"},
+    "triage_books": {"timeout": 30, "retryable": True, "category": "browse", "access_level": "read"},
     "list_concepts": {"timeout": 15, "retryable": True, "category": "browse", "access_level": "read"},
     "get_subgraph": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
     "ask_book": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
@@ -83,6 +85,11 @@ TOOL_DISPATCH = {
         project_description=args.get("project_description", ""),
         max_results=args.get("max_results", 15),
         similarity_threshold=args.get("similarity_threshold", 0.3),
+    ),
+    "triage_books": lambda args: triage_books(
+        project_description=args.get("project_description", ""),
+        top_k=args.get("top_k", 5),
+        threshold=args.get("threshold", 0.4),
     ),
     "list_concepts": lambda args: list_concepts(
         search=args.get("search"),
@@ -436,6 +443,35 @@ async def list_tools() -> list[Tool]:
                     "similarity_threshold": {
                         "type": "number",
                         "description": "Minimum cosine similarity to include (0.0-1.0, default: 0.3)",
+                    },
+                },
+                "required": ["project_description"],
+            },
+        ),
+        Tool(
+            name="triage_books",
+            description=(
+                "TRIAGE — Rank registered books by cosine similarity to a project "
+                "description. Embeds the description and matches against each "
+                "book's summary_embedding. Returns ranked list with scores. Pure "
+                "read tool, deterministic, no consultation_id created. With one "
+                "book registered the ranking is degenerate; the value emerges as "
+                "the corpus grows."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_description": {
+                        "type": "string",
+                        "description": "Free-text description of the user's project, architecture, and goals",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Maximum books to return (1-50, default: 5)",
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "Minimum cosine score to include (0.0-1.0, default: 0.4)",
                     },
                 },
                 "required": ["project_description"],

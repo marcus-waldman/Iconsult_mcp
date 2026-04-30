@@ -476,6 +476,45 @@ def get_stats() -> dict:
     }
 
 
+def search_books_by_embedding(
+    query_embedding: list[float],
+    max_results: int = 5,
+    threshold: float = 0.0,
+) -> list[dict]:
+    """Cosine similarity over books.summary_embedding (Phase 2b triage).
+
+    Skips books whose summary_embedding is NULL. Deterministic for a given
+    embedding input. Returns `score` rounded to 4 decimals to match the
+    existing concept-search style.
+    """
+    conn = get_connection()
+    dims = EMBEDDING_DIMENSIONS
+
+    rows = conn.execute(f"""
+        SELECT
+            id, title, altitude, is_oracle,
+            array_cosine_similarity(summary_embedding, ?::FLOAT[{dims}]) AS score
+        FROM books
+        WHERE summary_embedding IS NOT NULL
+        ORDER BY score DESC
+        LIMIT ?
+    """, [query_embedding, max_results]).fetchall()
+
+    out = []
+    for r in rows:
+        score = round(r[4], 4) if r[4] is not None else 0.0
+        if score < threshold:
+            continue
+        out.append({
+            "id": r[0],
+            "title": r[1],
+            "altitude": r[2],
+            "is_oracle": bool(r[3]),
+            "score": score,
+        })
+    return out
+
+
 def search_concepts_by_embedding(
     query_embedding: list[float],
     max_results: int = 10,
