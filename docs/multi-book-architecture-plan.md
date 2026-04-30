@@ -303,6 +303,8 @@ Add new tests:
 
 **Status (as of 2026-04-30):** **Phases 1 and 2 complete.** All sub-stages (1a–1d, 2a–2c) shipped on `feat/multi-book-kg` and pushed to `origin`. Phase 2 verification: `arsanjani_2026.summary` (5145 chars, hybrid Claude-draft + user edit) embedded as 1536-dim vector; `triage_books` MCP tool returns 0.4502 cosine for an obviously-relevant agentic project description and < 0.2 for off-topic ones; 142/142 tests pass. Ready to start **Phase 3** (per-project canonical layer) in a fresh session — see [`todo/phase-3-briefing.md`](./todo/phase-3-briefing.md).
 
+**Phase 3 / book-2 execution order (locked 2026-04-30):** Hybrid. The phasing table below documents *scope*; the actual execution order is `3a (schema) → 3b (start_project + list_books) → second-book ingestion (inline) → 3c (alignment) → 3d (verification)`. Only the *ingestion* portion of Phase 6 runs inline; Phase 6's "run a real consultation, compare to single-book baseline" stays at the final merge gate after Phases 4 and 5. Rationale and full sub-staging in the Phase 3 briefing.
+
 **Branch strategy:** Single feature branch `feat/multi-book-kg` off `main`, phase-per-commit. Merge to `main` only when all 6 phases are verified end-to-end against a real second book. Each commit's tests must pass.
 
 **PDF→markdown toolchain:** Mathpix for all books (same as Arsanjani). Mathpix produces LaTeX-flavored markdown (`\section*{}` markers, OCR-cleaned index) that the existing `parse_index.py` / `parse_book.py` already consume. New books slot in without parser rewrites.

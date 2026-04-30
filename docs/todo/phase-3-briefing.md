@@ -39,6 +39,7 @@ Both branches are pushed to `origin`. Local DuckDB at `data/iconsult.duckdb` con
 | Concept ID convention | `{book_id}__{slug}` prefix on every concept and section ID. `normalize_pattern_id()` strips the prefix before alias lookup. Unchanged. |
 | Oracle | Ch. 12 of Arsanjani is the immutable scoring oracle. Multi-book scoring works via `_PATTERN_ID_ALIASES` populated at alignment time (Phase 5 finishes the wiring; Phase 3 prepares the alias mapping data). |
 | Branch strategy | Single `feat/multi-book-kg`, phase-per-commit. Merge to `main` only after all 6 phases land + a real second book is verified. |
+| Phase 3 / book-2 ordering | **Hybrid execution.** Implement 3a (schema) and 3b (`start_project` + `list_books`) with the single-book corpus, then **inline a real second-book ingestion** (run the existing pipeline on a mid-level pattern book — Hohpe / Nygard / Fowler), then resume with 3c (alignment) and 3d (verification). Rationale: alignment is the LLM-judgment-heavy step where synthetic fixtures are most likely to mislead; doing it against real data avoids the synthetic-fixture trap. Note: this only inlines the *ingestion* part of Phase 6. The "run a real consultation, compare to single-book baseline" portion of Phase 6 stays at the final merge gate after Phases 4 and 5. |
 
 ## Phase 3 scope
 
@@ -90,14 +91,15 @@ Per the plan: "**Per-project canonical layer.** `start_project` + `build_project
 
 - `scripts/align_book_pair.py` — populates `concept_alignment_cache` for a given pair of book_ids. Reusable by `build_project_kg` (which calls it on demand for un-cached pairs) and runnable standalone by an operator who wants to pre-warm the cache before the first project consultation.
 
-### Suggested sub-staging
+### Sub-staging (hybrid execution order — locked)
 
 | Stage | Scope |
 |---|---|
-| **3a** | Schema + DB helpers + `list_books` tool. Add `projects`, `canonical_concepts`, `concept_alignment_cache` tables to `db.py`. New helpers: `create_project`, `get_project`, `list_projects`, `upsert_canonical_concept`, `get_alignment_decision`, `record_alignment_decision`. Register `list_books` in `server.py` (4-place edit). New `tests/test_projects_schema.py`. |
-| **3b** | `start_project` tool. New `src/iconsult_mcp/tools/projects.py`. Internal triage via existing `triage_books` when `triaged_book_ids` omitted. Tests verify project creation, idempotent re-runs by id, triage fallback path. |
-| **3c** | `align_book_pair.py` + `build_project_kg` tool. The hardest piece — Claude adjudication prompt design, batched LLM calls, alignment-cache reuse, role classification (supporting_evidence vs. informational_only based on rubric alias hits), canonical embedding computation. Tests use a synthetic second book fixture seeded into a transient DB; production validation defers to Phase 6 when a real second book lands. |
-| **3d** | Phase 3 verification + commit. Single-book degenerate path test: `build_project_kg` on a project with `triaged_book_ids=['arsanjani_2026']` produces a 1-book canonical layer (each canonical_concept is identity-mapped to one source concept). Update `CLAUDE.md`. Push. |
+| **3a** | Schema + DB helpers + `list_books` tool. Add `projects`, `canonical_concepts`, `concept_alignment_cache` tables to `db.py`. New helpers: `create_project`, `get_project`, `list_projects`, `upsert_canonical_concept`, `get_alignment_decision`, `record_alignment_decision`. Register `list_books` in `server.py` (4-place edit). New `tests/test_projects_schema.py`. Single-book corpus is fine for this stage; nothing here exercises cross-book alignment. |
+| **3b** | `start_project` tool. New `src/iconsult_mcp/tools/projects.py`. Internal triage via existing `triage_books` when `triaged_book_ids` omitted. Tests verify project creation, idempotent re-runs by id, triage fallback path. Still single-book. |
+| **(inline)** | **Second-book ingestion.** Pause Phase 3. Pick a mid-level pattern book (Hohpe EIP / Nygard *Release It!* / Fowler), run it through Mathpix → markdown, add a `BOOKS` registry entry, run `seed_books_table.py` and `run_pipeline.py --book <new_id>`, generate + commit its summary via `generate_book_summary.py`. After this stage the corpus has 2 books. ~30-60 min wall time + real API cost. Note: this is *only the ingestion portion* of Phase 6. The "run a real consultation, compare to single-book baseline" portion stays at the final merge gate after Phases 4 and 5. |
+| **3c** | `align_book_pair.py` + `build_project_kg` tool — now against real two-book data. Claude adjudication prompt design, batched LLM calls, alignment-cache reuse, role classification (supporting_evidence vs. informational_only based on rubric alias hits), canonical embedding computation. Manual review of a sample of canonical clusters confirms quality. |
+| **3d** | Phase 3 verification + commit. End-to-end: `start_project(...)` → `build_project_kg(project_id)` → inspect canonical_concepts, concept_alignment_cache for both real books. Update `CLAUDE.md`. Push. |
 
 ## Files that will change
 
@@ -108,7 +110,7 @@ Per the plan: "**Per-project canonical layer.** `start_project` + `build_project
 - **NEW** `tests/test_projects_schema.py`
 - **NEW** `tests/test_projects.py`
 - **NEW** `tests/test_alignment.py`
-- **MODIFY** `tests/conftest.py` — likely needs a synthetic-second-book fixture helper for tests that require alignment paths
+- **MODIFY** `tests/conftest.py` — likely gains a project-cleanup fixture analogous to the existing `consultation_cleanup` (delete project / canonical_concepts / alignment_cache rows tagged with test markers)
 - **MODIFY** `CLAUDE.md` — tools list, schema list, mention Phase 3 work
 
 ## Reuse — don't reinvent
@@ -134,26 +136,32 @@ py -m pytest tests/test_projects.py -v
 #   start_project(name="test", project_description="multi-agent supervisor architecture")
 #   → returns project_id, triaged_book_ids=['arsanjani_2026']
 
-# After 3c (with synthetic 2nd book):
+# After second-book ingestion (inline):
+py -c "from iconsult_mcp.db import list_books; print([b['id'] for b in list_books()])"
+# Expect: ['arsanjani_2026', '<new_book_id>']
+#   triage_books("multi-agent supervisor") → both books ranked, scores compared
+
+# After 3c (with two real books in the corpus):
 py -m pytest tests/test_alignment.py -v
-# alignment-cache and canonical_concepts populated on synthetic fixture
+# alignment_cache populated for the (arsanjani_2026, <new_book_id>) pair
+# canonical_concepts span both books with correct role classification
 
 # After 3d:
 py -m pytest tests/ -v       # 142 + new tests, all green
-# Single-book degenerate run end-to-end:
+# End-to-end:
 #   start_project(...) → build_project_kg(project_id)
-#   → 138 canonical_concepts, 1:1 with source concepts, all role inheritance correct
+#   → canonical_concepts spanning both books, sample manually reviewed for cluster quality
 ```
 
 ## Cost / time
 
-- **Schema work + helpers**: small, ~1-2 hours
-- **`start_project` + `list_books`**: small, ~1 hour
-- **`build_project_kg` + `align_book_pair.py`**: largest piece, ~4-6 hours including Claude prompt design and alignment-cache logic
-- **Tests with synthetic fixture**: medium, ~2-3 hours
-- **API cost during dev**: near-zero — no real alignment calls until Phase 6 lands a real second book; tests can mock the alignment LLM call to keep them fast and deterministic
+- **3a (schema + helpers)**: small, ~1-2 hours
+- **3b (`start_project` + `list_books`)**: small, ~1 hour
+- **Second-book ingestion (inline)**: ~30-60 min wall time + real API cost (~$5-15 for full pipeline on a mid-level book; depends on book length and chapter count)
+- **3c (`build_project_kg` + `align_book_pair.py`)**: largest piece, ~4-6 hours including Claude prompt design and alignment-cache logic; alignment LLM cost depends on number of cosine-shortlisted pairs (~$1-5 for a single book pair)
+- **3d (tests + verification)**: medium, ~2-3 hours
 
-Total Phase 3 implementation: **probably one focused session** (~6-10 hours of working time).
+Total Phase 3 implementation: **likely two focused sessions** — one to ship 3a/3b + ingest the second book, another to tackle alignment + verification.
 
 ## First commands to run in the new session
 
@@ -166,14 +174,12 @@ py -c "from iconsult_mcp.db import get_book; r = get_book('arsanjani_2026'); pri
 # Expect: summary: 5145 has_emb: True
 ```
 
-## Open question (worth deciding before 3a starts)
+## Decided — execution order (locked 2026-04-30)
 
-**Phase 3 needs a 2-book corpus to verify alignment for real. We have one book. Three options:**
+Hybrid: 3a → 3b → second-book ingestion → 3c → 3d. See the matching row in the locked-decisions table above and the sub-staging table.
 
-1. **Implement Phase 3 with synthetic fixtures.** Tests seed a fake `_test_book` with a handful of concepts that overlap arsanjani_2026 in known ways. Alignment code paths exercise. Real verification happens later when Phase 6 onboards a second book. *Recommended — keeps the plan ordered as designed.*
+**Why this order, not synthetic fixtures:** alignment is the one place where the code calls Claude to adjudicate "are these two concepts the same?" Synthetic fixtures are most likely to mislead in exactly that LLM-judgment-heavy step — a hand-crafted fake second book might exercise the code paths but won't surface the kinds of edge cases (vocabulary mismatch across authors, partial overlap, false friends) that real adjudication encounters. Doing 3a/3b first keeps momentum on safe schema + tooling work; pausing to ingest a real second book before 3c gets us real adjudication data when it actually matters.
 
-2. **Reorder: do Phase 6 first.** Onboard a real mid-level pattern book (Hohpe EIP / Nygard *Release It!* / Fowler) before Phase 3. Get real alignment data immediately. Cost: real Mathpix → markdown work + a real Claude pipeline run (~30-60 min, real API cost) before Phase 3 can proceed. Benefit: every subsequent phase tests against real data, not synthetic fixtures.
+**Why not pure reorder (Phase 6 first):** the schema and `start_project` work doesn't need a second book and can ship fast. Doing it first also means when we ingest the second book, the project-scoping infrastructure already exists to test against.
 
-3. **Hybrid: implement 3a + 3b now (schema + start_project + list_books), then pause and run Phase 6 inline before tackling 3c (alignment).** Lets the easier work ship first; the alignment piece — which is where synthetic fixtures might subtly diverge from real LLM behavior — gets real data when it lands. Cost: an extra context-switch in the middle of Phase 3.
-
-The plan as written assumes option 1. Option 2 or 3 are reasonable course-corrections — neither breaks the locked decisions, both extend total time before the merge gate. Worth deciding at the start of 3a.
+**Book-pick decision happens at the start of the inline ingestion stage, not now.** Hohpe EIP, Nygard *Release It!*, and Fowler are all viable; pick whichever has the cleanest Mathpix output and best altitude match.
