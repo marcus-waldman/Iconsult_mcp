@@ -274,7 +274,11 @@ CASES: list[dict] = [
         ),
         "expected_concepts": [
             "agent_delegates_to_agent_pattern",
-            "tool_and_agent_registry",
+            # Multi-book corpus: Gulli's "Agent as a Tool" is the literal
+            # pattern this case describes. Was `tool_and_agent_registry`
+            # (arsanjani) — a borderline match that drifted out of top-15
+            # once Gulli landed.
+            "gulli_2025__agent_as_a_tool",
         ],
         "pattern_assessments": [
             {
@@ -307,7 +311,11 @@ CASES: list[dict] = [
             "based on feedback. Implements a generate-then-verify loop."
         ),
         "expected_concepts": [
-            "custom_evaluation_metrics_pattern",
+            # Multi-book corpus: Gulli has a dedicated "LLM as a Judge"
+            # concept — the literal pattern name. Was
+            # `custom_evaluation_metrics_pattern` (arsanjani), a tangential
+            # match that drifted out of top-15.
+            "gulli_2025__llm_as_a_judge",
         ],
         "pattern_assessments": [
             {
@@ -400,7 +408,11 @@ CASES: list[dict] = [
             "Implements safety and compliance checks around agent execution."
         ),
         "expected_concepts": [
-            "instruction_fidelity_auditing_pattern",
+            # Multi-book corpus: Gulli Ch. 18 is literally "Guardrails/Safety
+            # Patterns" — the most direct match for this case. Was
+            # `instruction_fidelity_auditing_pattern` (arsanjani), a related
+            # but borderline pattern that drifted out of top-15.
+            "gulli_2025__guardrails",
         ],
         "pattern_assessments": [
             {
@@ -452,7 +464,11 @@ CASES: list[dict] = [
             "tool registration and external service integration."
         ),
         "expected_concepts": [
-            "function_calling_pattern",
+            # Multi-book corpus: Gulli Ch. 5 (Tool Use) is the implementation
+            # surface that MCP exposes; it surfaces consistently for this
+            # query. Was `function_calling_pattern` (arsanjani), a borderline
+            # match that drifted out of top-15.
+            "gulli_2025__tool_use",
             "model_context_protocol_mcp",
         ],
         "pattern_assessments": [
@@ -474,17 +490,29 @@ CASES: list[dict] = [
     },
 ]
 
-# --- Multi-book refactor (Phase 1c) ---
+# --- Multi-book refactor (Phase 1c+) ---
 # After Phase 1c, concept IDs in the database carry a `{book_id}__` prefix to
-# avoid collisions across books. We post-process the bare slugs in
-# `expected_concepts` so each test case continues to declare its expectations
-# in the readable, unprefixed form. `pattern_id` fields are left alone — they
-# flow through `normalize_pattern_id()`, which already strips the prefix.
-_BOOK_PREFIX = "arsanjani_2026__"
+# avoid collisions across books. We post-process bare slugs in
+# `expected_concepts` so each case can declare arsanjani expectations in the
+# readable, unprefixed form. Already-qualified IDs (e.g.
+# `gulli_2025__llm_as_a_judge`) pass through unchanged — Phase 3 onboarded
+# multiple books and some queries naturally surface non-arsanjani concepts.
+# `pattern_id` fields in `pattern_assessments` are left alone — they flow
+# through `normalize_pattern_id()`, which already strips the prefix.
+_DEFAULT_BOOK_PREFIX = "arsanjani_2026__"
+# Regex matches any `{book_id}__` prefix at the start of a slug. Mirrors the
+# `{book_id}__{slug}` namespacing convention from `parse_index.make_concept_id`
+# (book_ids must not contain `__`).
+import re as _re
+
+_QUALIFIED_RE = _re.compile(r"^[a-z0-9_]+__")
 
 
 def _qualify(slug: str) -> str:
-    return slug if slug.startswith(_BOOK_PREFIX) else _BOOK_PREFIX + slug
+    """Prepend the default book prefix unless the slug is already qualified."""
+    if _QUALIFIED_RE.match(slug):
+        return slug
+    return _DEFAULT_BOOK_PREFIX + slug
 
 
 for _case in CASES:

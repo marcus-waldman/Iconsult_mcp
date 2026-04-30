@@ -50,9 +50,62 @@ def _build_arsanjani_2026_boundaries() -> dict:
     }
 
 
+# --- gulli_2025 -------------------------------------------------------------
+# Source: Antonio Gulli, "Agentic Design Patterns: A Hands-On Guide to Building
+# Intelligent Systems" (Springer Nature, December 2025), 424 pages.
+#
+# Line numbers were extracted from the Mathpix output at
+# `literature/gulli_2025/Gulli - 2025- ...md` by grep'ing `\section*{Chapter
+# N: ...}` markers. Page-start values were reconstructed from the TOC's
+# per-chapter page-count column (book lines 11-44) cumulatively from a
+# front-matter total of 18 pages; cross-checked against three explicit page
+# refs in the TOC (Ch7→121, Ch11→182, Ch14→216, Ch21→330) — all matched
+# within ±1 page.
+#
+# Parts: Part One = Chs 1-7 (foundational patterns), Part Two = Chs 8-11
+# (memory/learning/MCP/goals), Part Three = Chs 12-14 (recovery/HITL/RAG),
+# Part Four = Chs 15-21 (advanced/inter-agent/safety/eval). Appendices A-G
+# are intentionally excluded — Phase 3 ingestion scopes strictly to numbered
+# chapters; revisit if appendix content is needed downstream.
+GULLI_2025_CHAPTERS: list[dict] = [
+    {"number": 1,  "title": "Prompt Chaining",                "part": 1, "page_start": 19,  "line_start": 311},
+    {"number": 2,  "title": "Routing",                        "part": 1, "page_start": 31,  "line_start": 548},
+    {"number": 3,  "title": "Parallelization",                "part": 1, "page_start": 44,  "line_start": 938},
+    {"number": 4,  "title": "Reflection",                     "part": 1, "page_start": 59,  "line_start": 1351},
+    {"number": 5,  "title": "Tool Use",                       "part": 1, "page_start": 72,  "line_start": 1638},
+    {"number": 6,  "title": "Planning",                       "part": 1, "page_start": 92,  "line_start": 2255},
+    {"number": 7,  "title": "Multi-Agent Collaboration",      "part": 1, "page_start": 105, "line_start": 2545},
+    {"number": 8,  "title": "Memory Management",              "part": 2, "page_start": 122, "line_start": 2982},
+    {"number": 9,  "title": "Learning and Adaptation",        "part": 2, "page_start": 143, "line_start": 3540},
+    {"number": 10, "title": "Model Context Protocol",         "part": 2, "page_start": 155, "line_start": 3717},
+    {"number": 11, "title": "Goal Setting and Monitoring",    "part": 2, "page_start": 171, "line_start": 4040},
+    {"number": 12, "title": "Exception Handling and Recovery","part": 3, "page_start": 183, "line_start": 4372},
+    {"number": 13, "title": "Human-in-the-Loop",              "part": 3, "page_start": 191, "line_start": 4505},
+    {"number": 14, "title": "Knowledge Retrieval (RAG)",      "part": 3, "page_start": 200, "line_start": 4658},
+    {"number": 15, "title": "Inter-Agent Communication (A2A)","part": 4, "page_start": 217, "line_start": 4956},
+    {"number": 16, "title": "Resource-Aware Optimization",    "part": 4, "page_start": 232, "line_start": 5314},
+    {"number": 17, "title": "Reasoning Techniques",           "part": 4, "page_start": 247, "line_start": 5735},
+    {"number": 18, "title": "Guardrails/Safety Patterns",     "part": 4, "page_start": 271, "line_start": 6147},
+    {"number": 19, "title": "Evaluation and Monitoring",      "part": 4, "page_start": 290, "line_start": 6725},
+    {"number": 20, "title": "Prioritization",                 "part": 4, "page_start": 308, "line_start": 7098},
+    {"number": 21, "title": "Exploration and Discovery",      "part": 4, "page_start": 318, "line_start": 7367},
+]
+# `\section*{Chapter 1: ...}` is line 311, but Chapter 1's slug is generated
+# from that title-bearing marker itself, so CONTENT_START_LINE stays at 311.
+GULLI_2025_CONTENT_START_LINE = 311
+
+
+def _build_gulli_2025_boundaries() -> dict:
+    return {
+        "content_start_line": GULLI_2025_CONTENT_START_LINE,
+        "chapters": list(GULLI_2025_CHAPTERS),
+    }
+
+
 # Per-book chapter_boundaries builders. Add new entries as books are onboarded.
 _BOUNDARY_BUILDERS = {
     "arsanjani_2026": _build_arsanjani_2026_boundaries,
+    "gulli_2025": _build_gulli_2025_boundaries,
 }
 
 

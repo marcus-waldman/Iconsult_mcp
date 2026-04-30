@@ -44,6 +44,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 ## Database
 - Local DuckDB file at `data/iconsult.duckdb` (override with `ICONSULT_DB`)
 - 16 tables + 1 metadata table; multi-book refactor adds `books` (corpus catalogue with summary_embedding for triage, is_oracle flag, chapter_boundaries JSON) plus `book_id` columns on `concepts` / `sections` / `relationships`; Phase 3a adds `projects` (per-project cache with triaged_book_ids and unified_kg_built_at), `canonical_concepts` (project-scoped alignment layer with role + rubric_pattern_id + canonical_embedding), `concept_alignment_cache` (global, book-pair scoped LLM verdicts on whether two concepts are the same)
+- Multi-book uniqueness: `concepts.name` is no longer column-level UNIQUE — replaced with composite `UNIQUE(name, book_id)` so the same concept name can coexist in multiple books (Phase 3 alignment is what reconciles them); `_migrate_concepts_name_unique` in `db.py` handles the in-place upgrade for legacy databases (idempotent)
 - Concept and section IDs are `{book_id}__{slug}` namespaced; `normalize_pattern_id()` strips the prefix before alias lookup so the rubric stays book-agnostic
 - `consultations` tracks reproducible sessions; `consultation_state` shared memory; `consultation_events` reactivity; `implementation_plans` cross-session plans; `blackboard_facts` typed/versioned coordination; `consultation_quality` ratings
 - `sections.content` stores cleaned book text per section (populated by `scripts/populate_content.py`)
@@ -95,10 +96,11 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 7. OFFER IMPLEMENTATION PLAN — ask user if they want a step-by-step plan; if yes, `generate_implementation_plan`; recommend fresh conversation for implementation using `get_implementation_plan` + `update_plan_step`
 
 ## Literature
-- Per-book layout: `literature/{book_id}/{book.md, index.md}` (e.g., `literature/arsanjani_2026/`)
+- Per-book layout: `literature/{book_id}/{book.md, index.md}` (e.g., `literature/arsanjani_2026/`, `literature/gulli_2025/`)
 - File names + book metadata live in `BOOKS` registry in `config.py`; resolve via `get_book_paths(book_id)`
-- Mathpix-extracted LaTeX-flavored markdown (uses `\section*{}` not `#`); index has OCR artifacts (merged page numbers, separated name/number blocks)
-- For arsanjani_2026: content starts at line ~985, chapters marked by `\section*{N}` then `\section*{Title}`
+- Mathpix-extracted LaTeX-flavored markdown (uses `\section*{}` not `#`); index format varies by book
+- For `arsanjani_2026` (oracle, mid_level): content starts at line ~985, chapters marked by `\section*{N}` then `\section*{Title}`; index has page numbers
+- For `gulli_2025` (implementation): chapters marked by `\section*{Chapter N: Title}`; original index uses *chapter references* (`Concept - Chapter N: Title`) rather than page numbers, so `scripts/synthesize_gulli_index.py` pre-processes it into an Arsanjani-compatible page-numbered shadow index (`INDEX-page-numbered.md`); the synthesized file is what `parse_index.py` consumes
 
 ## Pipeline
 - Every phase script accepts `--book <book_id>` (default `arsanjani_2026`); IDs and queries are book-scoped
@@ -111,6 +113,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `populate_content.py` — fills `sections.content` from book markdown (run before phase 4 re-embed)
 - `extract_indicators.py` — one-time: mines Ch. 12 + source chapters to produce `rubric_data.py` with binary indicators per pattern
 - `generate_book_summary.py --book <id> {--draft|--commit|--show}` — Phase 2a: Claude drafts a triage-oriented summary (`--draft` writes to `literature/{book_id}/summary.md`, no DB write), user reviews/edits, then `--commit` embeds it and updates `books.summary` + `books.summary_embedding` via `set_book_summary` (UPDATE, doesn't touch other columns)
+- `synthesize_gulli_index.py` — one-shot preprocessor for the `gulli_2025` index (chapter-reference format → Arsanjani-style page-numbered); regenerate by re-running if the upstream INDEX.md changes
 - Orchestrator: `run_pipeline.py --book <id>` — runs all phases for one book; `--reset` clears that book's metadata only
 
 ## Notes

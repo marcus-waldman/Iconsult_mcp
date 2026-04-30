@@ -94,23 +94,35 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
     """)
 
     # --- concepts: graph nodes ---
+    # Multi-book design: `(name, book_id)` UNIQUE, not `name` alone — the
+    # same concept name can legitimately appear in multiple books, and
+    # Phase 3 alignment is what reconciles them across books. Existing
+    # databases created before this design migrate via
+    # `_migrate_concepts_name_unique` below.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS concepts (
             id VARCHAR PRIMARY KEY,
-            name VARCHAR UNIQUE NOT NULL,
+            name VARCHAR NOT NULL,
             definition TEXT,
             category VARCHAR,
-            page_references INTEGER[]
+            page_references INTEGER[],
+            book_id VARCHAR,
+            UNIQUE (name, book_id)
         )
     """)
 
     # Migrate: add book_id column if missing (multi-book refactor, Phase 1a).
-    # Initially nullable; populated by the rebuilt pipeline in Stage 1c.
+    # Initially nullable; populated by the rebuilt pipeline in Stage 1c. Skipped
+    # silently when the column already exists (fresh DBs hit the new CREATE).
     try:
         conn.execute("ALTER TABLE concepts ADD COLUMN book_id VARCHAR")
         logger.info("Added book_id column to concepts table")
     except Exception:
         pass  # Column already exists
+
+    # Migrate: drop legacy column-level UNIQUE on `name`, install composite
+    # UNIQUE on (name, book_id). Idempotent — see helper docstring.
+    _migrate_concepts_name_unique(conn)
 
     # --- sections: book sections ---
     conn.execute("""
@@ -360,6 +372,84 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
     logger.info("Schema initialized successfully")
 
 
+def _migrate_concepts_name_unique(conn: duckdb.DuckDBPyConnection) -> bool:
+    """Migrate concepts.name UNIQUE → UNIQUE(name, book_id). Idempotent.
+
+    The single-book schema enforced `name VARCHAR UNIQUE NOT NULL`. With
+    multi-book ingestion the same concept name legitimately appears in more
+    than one book (e.g., "MCP" in both Arsanjani 2026 and Gulli 2025), and
+    that's *exactly* what Phase 3 alignment reconciles. The old constraint
+    silently rejected the second-book copy, dropping the highest-confidence
+    cross-book alignment candidates.
+
+    Performs a table swap: create `concepts_new` with the new constraint,
+    copy all rows (`id` PKs preserved so soft references in
+    relationships / concept_sections / concept_embeddings keep working),
+    drop the old, rename. Wrapped in a transaction.
+
+    Returns True if the migration ran, False if the schema is already
+    correct (fresh DBs, or DBs already migrated).
+    """
+    rows = conn.execute(
+        """
+        SELECT constraint_type, constraint_column_names
+        FROM duckdb_constraints()
+        WHERE table_name = 'concepts'
+        """
+    ).fetchall()
+
+    has_old = False
+    has_new = False
+    for ctype, cols in rows:
+        if ctype != "UNIQUE":
+            continue
+        col_set = sorted(cols)
+        if col_set == ["name"]:
+            has_old = True
+        elif col_set == ["book_id", "name"]:
+            has_new = True
+
+    if has_new and not has_old:
+        return False  # already migrated (or fresh DB hit the new CREATE)
+    if not has_old:
+        return False  # neither — nothing to do
+
+    logger.info("Migrating concepts.name UNIQUE → UNIQUE(name, book_id)")
+
+    conn.execute("BEGIN")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE concepts_new (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                definition TEXT,
+                category VARCHAR,
+                page_references INTEGER[],
+                book_id VARCHAR,
+                UNIQUE (name, book_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO concepts_new
+                (id, name, definition, category, page_references, book_id)
+            SELECT id, name, definition, category, page_references, book_id
+            FROM concepts
+            """
+        )
+        conn.execute("DROP TABLE concepts")
+        conn.execute("ALTER TABLE concepts_new RENAME TO concepts")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+    logger.info("Migration complete: UNIQUE(name, book_id) installed on concepts")
+    return True
+
+
 # --- Books registry helpers --------------------------------------------------
 
 
@@ -371,11 +461,17 @@ def upsert_book(
     altitude: str | None = None,
     is_oracle: bool = False,
     chapter_boundaries: dict | list | None = None,
-    summary: str | None = None,
 ) -> None:
     """Insert or replace a row in the `books` corpus catalogue.
 
-    `summary_embedding` is left untouched (Phase 2 generates it).
+    Writes only metadata + chapter_boundaries. `summary` and
+    `summary_embedding` are not in the column list, so they are preserved
+    on re-seed (DuckDB's INSERT OR REPLACE keeps columns absent from the
+    INSERT). The canonical writer for those is `set_book_summary` — keep
+    metadata seeding and summary committing on separate paths so a re-seed
+    of metadata never nukes the embedding, and a re-commit of the summary
+    never nukes the metadata.
+
     `chapter_boundaries` is JSON-serialized.
     """
     import json as _json
@@ -387,10 +483,10 @@ def upsert_book(
     conn.execute(
         """
         INSERT OR REPLACE INTO books
-            (id, title, authors, year, summary, altitude, is_oracle, chapter_boundaries)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (id, title, authors, year, altitude, is_oracle, chapter_boundaries)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        [book_id, title, authors, year, summary, altitude, is_oracle, boundaries_json],
+        [book_id, title, authors, year, altitude, is_oracle, boundaries_json],
     )
 
 

@@ -52,6 +52,19 @@ BOOKS: dict[str, dict] = {
         "book_filename": "Arsanjani and Bustos - 2026 - Agentic architectural patterns for building multi-agent systems proven.md",
         "index_filename": "Arsanjani and Bustos - INDEX.md",
     },
+    "gulli_2025": {
+        "title": "Agentic Design Patterns: A Hands-On Guide to Building Intelligent Systems",
+        "authors": "Antonio Gulli",
+        "year": 2025,
+        "altitude": "implementation",
+        "is_oracle": False,
+        "subdir": "gulli_2025",
+        "book_filename": "Gulli - 2025- Agentic Design Patterns A Hands-On Guide to Building.md",
+        # Synthesized page-numbered index (chapter-ref → chapter-start-page).
+        # Source `Gulli - 2025 - INDEX.md` is preserved alongside it.
+        # Regenerate via `py scripts/synthesize_gulli_index.py`.
+        "index_filename": "Gulli - 2025 - INDEX-page-numbered.md",
+    },
 }
 
 
