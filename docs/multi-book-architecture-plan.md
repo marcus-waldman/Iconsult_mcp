@@ -21,7 +21,7 @@ User's confirmed answers:
 ### Database & graph query decisions (post-plan amendments)
 
 - **Local DuckDB only.** Database lives on the local filesystem (path configured via `ICONSULT_DB`, defaulting to a project-local file). MotherDuck is **not** the deployment target — hosting decisions are deferred until after Phase 6, and the codebase must not assume MotherDuck. Reasons: proprietary considerations and uncertainty about hosting; local-first removes the MotherDuck-specific constraints (e.g., the existing VSS-extension fallback note in CLAUDE.md becomes obsolete).
-- **DuckPGQ adopted from the start.** The DuckDB community SQL/PGQ extension ([duckpgq](https://duckdb.org/community_extensions/extensions/duckpgq)) is loaded at DB-init time and used for graph traversal. Replaces the Python priority-queue BFS in `get_subgraph` with declarative `MATCH` patterns over a property graph view defined on `concepts` + `relationships`. Rationale: it gives Cypher-style ergonomics without leaving DuckDB, addresses the "graph query power" gap, and avoids splitting state across two stores. Risk: community extension (not core) — pin the extension version and keep the Python BFS as a fallback for at least one release.
+- **DuckPGQ evaluated and dropped (2026-04-30).** The DuckDB community SQL/PGQ extension was considered for graph traversal but is not currently published for `windows_amd64` on community-extensions.duckdb.org (404 on download). Rather than gate the project on a Windows-unfriendly dependency, we keep the existing Python priority-queue BFS in `get_subgraph` as the primary traversal mechanism. Revisit if/when DuckPGQ Windows support lands or if the dev environment moves to Linux/WSL.
 
 ## Recommended Architecture
 
@@ -307,17 +307,16 @@ Add new tests:
 
 **PDF→markdown toolchain:** Mathpix for all books (same as Arsanjani). Mathpix produces LaTeX-flavored markdown (`\section*{}` markers, OCR-cleaned index) that the existing `parse_index.py` / `parse_book.py` already consume. New books slot in without parser rewrites.
 
-**Phase 1 sub-staging.** Phase 1 is too large for a single commit. Split into five reviewable sub-stages, each its own commit on `feat/multi-book-kg`:
+**Phase 1 sub-staging.** Phase 1 is too large for a single commit. Split into four reviewable sub-stages, each its own commit on `feat/multi-book-kg`:
 
 | Stage | Scope | Verification |
 |---|---|---|
-| **1a** | Schema + DuckPGQ foundation: switch DB to local file (no MotherDuck), install + autoload the `duckpgq` community extension at connection init, add `books` table, add `book_id NOT NULL` to `concepts` / `sections` / `relationships`, backfill existing rows with `arsanjani_2026`, define property graph view over `concepts` + `relationships`, update `search_concepts_by_embedding` and `get_concept_relationships` to accept optional `book_id` filter | DB initializes locally, DuckPGQ loads, property graph view queries successfully; existing tests still pass |
+| **1a** | Schema foundation: switch DB connection from MotherDuck to local DuckDB file, add `books` table, add `book_id` (nullable) to `concepts` / `sections` / `relationships`, update `search_concepts_by_embedding` and `get_concept_relationships` to accept optional `book_id` filter | Local DB initializes with no `MOTHERDUCK_TOKEN`; new tables/columns exist; query helpers accept the new filter |
 | **1b** | Literature reorg + config: move existing `literature/Arsanjani*.md` files into `literature/arsanjani_2026/`, replace hardcoded `BOOK_FILENAME`/`INDEX_FILENAME` with per-book registry pattern, insert `arsanjani_2026` row in `books` table (title, authors=Arsanjani & Bustos, year=2026, altitude=mid_level, is_oracle=true, chapter_boundaries from existing `parse_book.CHAPTERS`) | Pipeline scripts can resolve book file paths via registry |
 | **1c** | Pipeline parameterization: thread `--book <id>` through `run_pipeline.py` and all six phase scripts (`parse_index`, `parse_book`, `tag_concepts`, `discover_relationships`, `build_graph`, `populate_content`); move chapter boundaries from hardcoded `parse_book.CHAPTERS` into `books.chapter_boundaries` JSON; concept IDs become `{book_id}__{slug}` to avoid collisions when a second book lands | Pipeline runs end-to-end with `--book arsanjani_2026` |
-| **1d** | `get_subgraph` rewrite: replace Python priority-queue BFS with SQL/PGQ `MATCH` patterns against the property graph view; keep the existing Python BFS as a feature-flagged fallback for at least one release. Confidence-first ordering preserved as a post-query sort. | New SQL/PGQ traversal returns same node/edge sets as old BFS for representative seed sets; `test_subgraph.py` passes |
-| **1e** | Verification + docs: re-run full pipeline on Arsanjani with `--reset` against a local DuckDB file, confirm all 134 existing tests pass, update `CLAUDE.md` (drop MotherDuck, add DuckPGQ, document local DB path) | All tests green; CLAUDE.md current |
+| **1d** | Verification + docs: re-run full pipeline on Arsanjani with `--reset` against a local DuckDB file, confirm all 134 existing tests pass, update `CLAUDE.md` (drop MotherDuck, document local DB path) | All tests green; CLAUDE.md current |
 
-Stage 1e is the merge gate for Phase 1 — only when verification passes do we move to Phase 2.
+Stage 1d is the merge gate for Phase 1 — only when verification passes do we move to Phase 2.
 
 ### Session continuity
 
