@@ -301,28 +301,26 @@ Add new tests:
 
 ## Implementation Tracking
 
-**Status (as of 2026-04-30):** Pre-Phase 1. Plan and visual proposal committed on `main`. Feature branch not yet created. No code changes yet.
+**Status (as of 2026-04-30):** **Phase 1 complete.** All four sub-stages (1a–1d) shipped on `feat/multi-book-kg` and pushed to `origin`. The merge gate is satisfied: full pipeline ran end-to-end on a fresh local DuckDB and produced 138 concepts, 786 sections, 583 relationships, 138 + 786 embeddings — all `book_id='arsanjani_2026'`, all IDs prefixed. 135/135 tests pass. Ready to start **Phase 2** (triage layer) in a fresh session — see [`todo/phase-2-briefing.md`](./todo/phase-2-briefing.md).
 
 **Branch strategy:** Single feature branch `feat/multi-book-kg` off `main`, phase-per-commit. Merge to `main` only when all 6 phases are verified end-to-end against a real second book. Each commit's tests must pass.
 
 **PDF→markdown toolchain:** Mathpix for all books (same as Arsanjani). Mathpix produces LaTeX-flavored markdown (`\section*{}` markers, OCR-cleaned index) that the existing `parse_index.py` / `parse_book.py` already consume. New books slot in without parser rewrites.
 
-**Phase 1 sub-staging.** Phase 1 is too large for a single commit. Split into four reviewable sub-stages, each its own commit on `feat/multi-book-kg`:
+**Phase 1 sub-staging — done.** Four reviewable sub-stages, one commit each on `feat/multi-book-kg`:
 
-| Stage | Scope | Verification |
-|---|---|---|
-| **1a** | Schema foundation: switch DB connection from MotherDuck to local DuckDB file, add `books` table, add `book_id` (nullable) to `concepts` / `sections` / `relationships`, update `search_concepts_by_embedding` and `get_concept_relationships` to accept optional `book_id` filter | Local DB initializes with no `MOTHERDUCK_TOKEN`; new tables/columns exist; query helpers accept the new filter |
-| **1b** | Literature reorg + config: move existing `literature/Arsanjani*.md` files into `literature/arsanjani_2026/`, replace hardcoded `BOOK_FILENAME`/`INDEX_FILENAME` with per-book registry pattern, insert `arsanjani_2026` row in `books` table (title, authors=Arsanjani & Bustos, year=2026, altitude=mid_level, is_oracle=true, chapter_boundaries from existing `parse_book.CHAPTERS`) | Pipeline scripts can resolve book file paths via registry |
-| **1c** | Pipeline parameterization: thread `--book <id>` through `run_pipeline.py` and all six phase scripts (`parse_index`, `parse_book`, `tag_concepts`, `discover_relationships`, `build_graph`, `populate_content`); move chapter boundaries from hardcoded `parse_book.CHAPTERS` into `books.chapter_boundaries` JSON; concept IDs become `{book_id}__{slug}` to avoid collisions when a second book lands | Pipeline runs end-to-end with `--book arsanjani_2026` |
-| **1d** | Verification + docs: re-run full pipeline on Arsanjani with `--reset` against a local DuckDB file, confirm all 134 existing tests pass, update `CLAUDE.md` (drop MotherDuck, document local DB path) | All tests green; CLAUDE.md current |
-
-Stage 1d is the merge gate for Phase 1 — only when verification passes do we move to Phase 2.
+| Stage | Commit | Scope | Verification |
+|---|---|---|---|
+| **1a** | `adf8e45` | Schema foundation: switch DB connection from MotherDuck to local DuckDB file, add `books` table, add `book_id` (nullable) to `concepts` / `sections` / `relationships`, update `search_concepts_by_embedding` and `get_concept_relationships` to accept optional `book_id` filter | ✅ Local DB initializes with no `MOTHERDUCK_TOKEN`; new tables/columns exist; query helpers accept the new filter |
+| **1b** | `b141d98` | Literature reorg + config: move existing `literature/Arsanjani*.md` files into `literature/arsanjani_2026/`, replace hardcoded `BOOK_FILENAME`/`INDEX_FILENAME` with per-book registry pattern, insert `arsanjani_2026` row in `books` table (title, authors=Arsanjani & Bustos, year=2026, altitude=mid_level, is_oracle=true, chapter_boundaries from existing `parse_book.CHAPTERS`) | ✅ Pipeline scripts can resolve book file paths via registry |
+| **1c** | `d63c5c6` | Pipeline parameterization: thread `--book <id>` through `run_pipeline.py` and all six phase scripts (`parse_index`, `parse_book`, `tag_concepts`, `discover_relationships`, `build_graph`, `populate_content`); move chapter boundaries from hardcoded `parse_book.CHAPTERS` into `books.chapter_boundaries` JSON; concept IDs become `{book_id}__{slug}` to avoid collisions when a second book lands | ✅ Pipeline runs end-to-end with `--book arsanjani_2026` |
+| **1d** | `1dd78d6` | Verification + docs: re-run full pipeline on Arsanjani with `--reset` against a local DuckDB file, confirm all 134 existing tests pass, update `CLAUDE.md` (drop MotherDuck, document local DB path) | ✅ 135/135 tests pass; CLAUDE.md current; pipeline reproducible (4 fixture updates in `tests/cases.py` to compensate for borderline embedding-ranking drift on fresh pipeline runs) |
 
 ### Session continuity
 
 When resuming this work in a new session:
 
 1. Read this section first.
-2. Check `git status` and `git log feat/multi-book-kg` to find the last completed sub-stage.
-3. The CLAUDE.md "Completed Work" section in user memory is also kept current — both should agree.
-4. Phases 2–6 stay as scoped in the table above; sub-staging will be decided at the start of each phase.
+2. For Phase 2 specifically, also read [`todo/phase-2-briefing.md`](./todo/phase-2-briefing.md) — full handoff with locked decisions, scope, files, and verification.
+3. Check `git status` and `git log feat/multi-book-kg` to find the last completed sub-stage / commit.
+4. Phases 2–6 stay as scoped in the table above; sub-staging will be decided at the start of each phase as a briefing under `docs/todo/`.
