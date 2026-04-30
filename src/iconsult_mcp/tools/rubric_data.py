@@ -485,6 +485,7 @@ _PATTERN_ID_ALIASES: dict[str, str] = {
     "tool_use_pattern": "single_agent_baseline",  # part of baseline
     "adaptive_retry_pattern": "simple_retry",
     "structured_reasoning_and_self": "fractal_cot_embedding",
+    "fcot_pattern": "fractal_cot_embedding",
     "instruction_fidelity_auditing_pattern": "instruction_fidelity_auditing",
     "adaptive_retry_with_prompt_mutation": "adaptive_retry_with_prompt_mutation",
     "supervisor_architecture": "supervisor_architecture",

@@ -46,6 +46,19 @@ def test_old_id_resolves_to_rubric_id():
     assert normalize_pattern_id("majority_voting_pattern") == "majority_voting"
 
 
+def test_fcot_pattern_anchors_to_fractal_cot_embedding():
+    """Arsanjani's `fcot_pattern` concept ID resolves to the rubric pattern.
+
+    Without this alias the multi-book canonical layer (Phase 3c) sees
+    arsanjani's FCoT cluster fall into informational_only even though
+    Self-Correction and Structured Reasoning (sibling FCoT siblings) DO
+    anchor correctly. Companion to `structured_reasoning_and_self` and
+    `self_correction_pattern` aliases.
+    """
+    assert normalize_pattern_id("fcot_pattern") == "fractal_cot_embedding"
+    assert normalize_pattern_id("arsanjani_2026__fcot_pattern") == "fractal_cot_embedding"
+
+
 def test_rubric_id_unchanged():
     """Rubric IDs are returned unchanged by normalize_pattern_id."""
     assert normalize_pattern_id("watchdog_timeout") == "watchdog_timeout"
