@@ -1305,6 +1305,159 @@ def get_subgraph(
     }
 
 
+def get_canonical_subgraph(
+    seed_canonical_ids: list[str],
+    project_id: str,
+    max_hops: int = 2,
+    confidence_threshold: float = 0.5,
+    max_edges: int = 50,
+    include_descriptions: bool = False,
+) -> dict:
+    """Project-scoped canonical traversal.
+
+    Phase 4b. Operates against the per-project canonical layer
+    (`canonical_concepts`) instead of raw source-book edges:
+
+      1. Resolve each seed canonical_id to its source-book member IDs.
+      2. Run the existing priority-queue BFS over `relationships` rows,
+         priority-ordered by edge confidence (highest first).
+      3. For every traversed source edge, map both endpoints back to their
+         canonical concept (skip when an endpoint isn't part of this
+         project's canonical layer, or when both endpoints land in the same
+         canonical cluster — intra-cluster edges aren't interesting).
+      4. Collapse multiple source edges that connect the same two canonical
+         concepts using **option 1: max-confidence collapse** — one canonical
+         edge per (from_canonical, to_canonical) pair, keeping the
+         highest-confidence source edge's `relationship_type` and
+         `confidence`. Source edges with different types between the same
+         clusters are reduced to a single canonical edge dictated by the
+         winner.
+
+    Output mirrors the legacy `get_subgraph` shape so the tool layer can
+    emit either with the same `nodes` / `edges` / `truncated` /
+    `total_edges_found` keys; nodes additionally carry `member_concept_ids`
+    / `role` / `rubric_pattern_id` to distinguish canonical entries.
+    """
+    import heapq
+
+    conn = get_connection()
+
+    canonical_rows = conn.execute(
+        """
+        SELECT id, name, member_concept_ids, role, rubric_pattern_id
+        FROM canonical_concepts
+        WHERE project_id = ?
+        """,
+        [project_id],
+    ).fetchall()
+
+    canonical_lookup: dict[str, dict] = {}
+    member_to_canonical: dict[str, str] = {}
+    for r in canonical_rows:
+        members = list(r[2]) if r[2] is not None else []
+        canonical_lookup[r[0]] = {
+            "id": r[0],
+            "name": r[1],
+            "member_concept_ids": members,
+            "role": r[3],
+            "rubric_pattern_id": r[4],
+        }
+        for m in members:
+            member_to_canonical[m] = r[0]
+
+    nodes: dict[str, dict] = {}
+    canonical_edges: dict[tuple[str, str], dict] = {}
+    seen_source_edges: set[int] = set()
+
+    for cid in seed_canonical_ids:
+        cluster = canonical_lookup.get(cid)
+        if cluster is None:
+            continue
+        nodes[cid] = {
+            "id": cid,
+            "name": cluster["name"],
+            "role": cluster["role"],
+            "rubric_pattern_id": cluster["rubric_pattern_id"],
+            "member_concept_ids": cluster["member_concept_ids"],
+            "depth": 0,
+            "is_seed": True,
+        }
+
+    pq: list[tuple[float, str, int]] = [(0.0, cid, 0) for cid in nodes]
+    heapq.heapify(pq)
+    explored: set[str] = set()
+
+    while pq:
+        _neg_conf, current_canonical_id, depth = heapq.heappop(pq)
+        if current_canonical_id in explored:
+            continue
+        explored.add(current_canonical_id)
+
+        if depth >= max_hops:
+            continue
+
+        cluster = canonical_lookup[current_canonical_id]
+
+        for member_id in cluster["member_concept_ids"]:
+            rels = get_concept_relationships(member_id, confidence_threshold)
+            for rel in rels:
+                if rel["id"] in seen_source_edges:
+                    continue
+                seen_source_edges.add(rel["id"])
+
+                from_id = rel["from_concept_id"]
+                to_id = rel["to_concept_id"]
+                from_can = member_to_canonical.get(from_id)
+                to_can = member_to_canonical.get(to_id)
+                if from_can is None or to_can is None:
+                    continue
+                if from_can == to_can:
+                    continue
+
+                key = (from_can, to_can)
+                rel_conf = rel["confidence"] if rel["confidence"] is not None else 0.0
+                existing = canonical_edges.get(key)
+                if existing is None or rel_conf > existing["confidence"]:
+                    edge = {
+                        "from": from_can,
+                        "to": to_can,
+                        "type": rel["relationship_type"],
+                        "confidence": rel_conf,
+                    }
+                    if include_descriptions and rel.get("description"):
+                        edge["description"] = rel["description"]
+                    canonical_edges[key] = edge
+
+                neighbour_can = to_can if from_can == current_canonical_id else from_can
+                if neighbour_can not in nodes:
+                    n_cluster = canonical_lookup[neighbour_can]
+                    nodes[neighbour_can] = {
+                        "id": neighbour_can,
+                        "name": n_cluster["name"],
+                        "role": n_cluster["role"],
+                        "rubric_pattern_id": n_cluster["rubric_pattern_id"],
+                        "member_concept_ids": n_cluster["member_concept_ids"],
+                        "depth": depth + 1,
+                        "is_seed": False,
+                    }
+                if neighbour_can not in explored:
+                    heapq.heappush(pq, (-rel_conf, neighbour_can, depth + 1))
+
+    sorted_edges = sorted(
+        canonical_edges.values(),
+        key=lambda e: -e["confidence"],
+    )
+    total_edges_found = len(sorted_edges)
+    output_edges = sorted_edges[:max_edges]
+
+    return {
+        "nodes": list(nodes.values()),
+        "edges": output_edges,
+        "truncated": total_edges_found > max_edges,
+        "total_edges_found": total_edges_found,
+    }
+
+
 def create_consultation(
     consultation_id: str,
     fingerprint: str,

@@ -125,6 +125,7 @@ TOOL_DISPATCH = {
         max_edges=args.get("max_edges", 50),
         include_descriptions=args.get("include_descriptions", False),
         consultation_id=args.get("consultation_id"),
+        project_id=args.get("project_id"),
     ),
     "ask_book": lambda args: ask_book(
         question=args.get("question", ""),
@@ -654,7 +655,13 @@ async def list_tools() -> list[Tool]:
                 "max_hops and returns all reachable nodes and edges. Use relationship types to "
                 "discover opportunities: alternative_to for competing approaches, "
                 "requires for prerequisites, conflicts_with for incompatibilities, complements "
-                "for synergies. Pass consultation_id to log traversal steps for coverage tracking."
+                "for synergies. Pass consultation_id to log traversal steps for coverage tracking. "
+                "When the consultation was opened with a project_id (or project_id is passed "
+                "explicitly here) AND the project's unified KG has been built, traversal runs over "
+                "the canonical edge view: each canonical seed expands to its source-book members, "
+                "BFS runs across raw relationships, and results collapse back to canonical "
+                "clusters with one edge per (from_canonical, to_canonical) pair (highest-confidence "
+                "source edge wins). Nodes carry member_concept_ids / role / rubric_pattern_id."
             ),
             inputSchema={
                 "type": "object",
@@ -662,7 +669,7 @@ async def list_tools() -> list[Tool]:
                     "concept_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of concept IDs to start traversal from",
+                        "description": "List of concept IDs to start traversal from. When project-scoped, these are canonical concept IDs from match_concepts.",
                     },
                     "max_hops": {
                         "type": "integer",
@@ -682,7 +689,11 @@ async def list_tools() -> list[Tool]:
                     },
                     "consultation_id": {
                         "type": "string",
-                        "description": "Optional consultation ID from match_concepts to log this step",
+                        "description": "Optional consultation ID from match_concepts to log this step. If the consultation is project-scoped, project_id is auto-picked up from the row.",
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional. Project ID from start_project. When provided and the project's unified KG is built, traversal runs over the canonical edge view instead of the raw concept graph. Usually unnecessary — picked up automatically from the consultation row.",
                     },
                 },
                 "required": ["concept_ids"],
