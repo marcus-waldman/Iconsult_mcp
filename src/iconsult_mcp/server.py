@@ -15,6 +15,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent, Tool
 
+from iconsult_mcp.arg_coerce import coerce_typed_args
 from iconsult_mcp.config import TOOL_MAX_RETRIES, TOOL_RETRY_BASE_DELAY, TOOL_TIMEOUT_SECONDS
 
 # Exceptions eligible for retry (network/timeout only, not logic errors)
@@ -1357,12 +1358,35 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+# Cached map of tool name -> inputSchema, populated lazily on first
+# call_tool invocation. Used by the defensive arg-coercion path to
+# JSON-decode string-encoded array / integer / number / boolean values
+# that some MCP harnesses (notably Claude Code) ship as strings.
+_TOOL_SCHEMAS: dict[str, dict] | None = None
+
+
+async def _get_tool_schemas() -> dict[str, dict]:
+    """Lazy schema cache built from list_tools()."""
+    global _TOOL_SCHEMAS
+    if _TOOL_SCHEMAS is None:
+        tools = await list_tools()
+        _TOOL_SCHEMAS = {t.name: t.inputSchema for t in tools}
+    return _TOOL_SCHEMAS
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     """Handle tool calls via dispatch table with timeout protection."""
     handler = TOOL_DISPATCH.get(name)
     if handler is None:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+    # Defensive coercion: some MCP harnesses JSON-encode array/integer/
+    # number/boolean params as strings before they reach the server.
+    # Decode them based on the tool's declared schema so individual tools
+    # don't have to defend against the harness quirk.
+    schemas = await _get_tool_schemas()
+    arguments = coerce_typed_args(arguments, schemas.get(name))
 
     meta = TOOL_METADATA.get(name, {})
     timeout = meta.get("timeout", TOOL_TIMEOUT_SECONDS)
