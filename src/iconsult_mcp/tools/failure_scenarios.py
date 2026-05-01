@@ -578,6 +578,19 @@ async def generate_failure_scenarios(
                 level_num = _LEVEL_PRIORITY.get(level_name, 2)
                 severity = _compute_severity(pid, dependents, level_num)
 
+                # Phase 5b: source-book attribution. When the user-logged
+                # assessment carries source_book_id, that's the answer
+                # ("we looked in gulli_2025 for this pattern and didn't
+                # find it in the project"). Otherwise default to
+                # arsanjani_2026 — every entry in PATTERN_FAILURE_TEMPLATES
+                # comes from arsanjani Ch. 7-12, so book-grounded scenarios
+                # are arsanjani-sourced by construction. The rubric IS
+                # Ch. 12. Emitted on every scenario so the report can
+                # render a consistent badge per row regardless of mode.
+                sbid = (
+                    assessment.get("source_book_id") if assessment else None
+                ) or "arsanjani_2026"
+
                 # Build the scenario
                 scenario = {
                     "scenario_id": len(scenarios) + 1,
@@ -595,6 +608,7 @@ async def generate_failure_scenarios(
                     "cascade_steps": cascade_steps,
                     "book_reference": template["book_ref"],
                     "mode": mode,
+                    "source_book_id": sbid,
                 }
 
                 # Add recovery recommendation
