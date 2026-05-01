@@ -230,6 +230,10 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
                 logger.debug(f"Could not create HNSW index on {table}: {e}")
 
     # --- consultations: reproducible consultation sessions ---
+    # `project_id` (nullable) ties a consultation to a Phase 3 `projects` row so
+    # the Phase 4 read tools (match_concepts / get_subgraph / ask_book) can
+    # scope to the project's canonical layer. NULL = legacy single-book
+    # consultation (existing behaviour preserved).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS consultations (
             id VARCHAR PRIMARY KEY,
@@ -238,9 +242,19 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
             matched_concept_ids VARCHAR[] NOT NULL,
             matched_scores FLOAT[],
             steps JSON DEFAULT '[]',
+            project_id VARCHAR,
             created_at TIMESTAMP DEFAULT current_timestamp
         )
     """)
+
+    # Migrate: add `project_id` to legacy consultations rows. Idempotent —
+    # silently skipped when the column already exists (fresh DBs hit the new
+    # CREATE above).
+    try:
+        conn.execute("ALTER TABLE consultations ADD COLUMN project_id VARCHAR")
+        logger.info("Added project_id column to consultations table")
+    except Exception:
+        pass  # Column already exists
 
     # --- consultation_state: shared epistemic memory (upsert-by-key) ---
     conn.execute("""
@@ -774,6 +788,56 @@ def list_canonical_concepts(project_id: str) -> list[dict]:
     ]
 
 
+def search_canonical_concepts_by_embedding(
+    query_embedding: list[float],
+    project_id: str,
+    max_results: int = 10,
+) -> list[dict]:
+    """Search a project's canonical_concepts by cosine similarity.
+
+    Project-scoped counterpart to `search_concepts_by_embedding`. Reads from
+    the per-project canonical layer populated by `build_project_kg`, so each
+    cluster appears once regardless of how many source-book concepts collapsed
+    into it. Used by Phase 4's project-scoped `match_concepts` path.
+
+    Args:
+        query_embedding: 1536-d query vector.
+        project_id: Restrict to canonical concepts owned by this project.
+        max_results: Maximum results to return.
+
+    Returns:
+        List of dicts: id, name, member_concept_ids, role, rubric_pattern_id, score.
+    """
+    conn = get_connection()
+    dims = EMBEDDING_DIMENSIONS
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            id, name, member_concept_ids, role, rubric_pattern_id,
+            array_cosine_similarity(canonical_embedding, ?::FLOAT[{dims}]) as score
+        FROM canonical_concepts
+        WHERE project_id = ?
+          AND canonical_embedding IS NOT NULL
+        ORDER BY score DESC
+        LIMIT ?
+        """,
+        [query_embedding, project_id, max_results],
+    ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "name": r[1],
+            "member_concept_ids": list(r[2]) if r[2] is not None else [],
+            "role": r[3],
+            "rubric_pattern_id": r[4],
+            "score": round(r[5], 4) if r[5] else 0.0,
+        }
+        for r in rows
+    ]
+
+
 def _canonical_pair(concept_a_id: str, concept_b_id: str) -> tuple[str, str]:
     """Return the (a, b) tuple in canonical lexicographic order.
 
@@ -1247,12 +1311,18 @@ def create_consultation(
     description: str,
     concept_ids: list[str],
     scores: list[float],
+    project_id: str | None = None,
 ) -> None:
-    """Create a new consultation record."""
+    """Create a new consultation record.
+
+    `project_id` (optional) ties the consultation to a Phase 3 project so the
+    Phase 4 read tools can scope to the project's canonical layer. NULL =
+    legacy single-book consultation.
+    """
     conn = get_connection()
     conn.execute(
-        "INSERT OR REPLACE INTO consultations (id, project_fingerprint, project_description, matched_concept_ids, matched_scores) VALUES (?, ?, ?, ?, ?)",
-        [consultation_id, fingerprint, description, concept_ids, scores],
+        "INSERT OR REPLACE INTO consultations (id, project_fingerprint, project_description, matched_concept_ids, matched_scores, project_id) VALUES (?, ?, ?, ?, ?, ?)",
+        [consultation_id, fingerprint, description, concept_ids, scores, project_id],
     )
 
 
@@ -1319,7 +1389,7 @@ def get_consultation(consultation_id: str) -> dict | None:
     flush_consultation_steps(consultation_id)
     conn = get_connection()
     row = conn.execute(
-        "SELECT id, project_fingerprint, project_description, matched_concept_ids, matched_scores, steps, created_at FROM consultations WHERE id = ?",
+        "SELECT id, project_fingerprint, project_description, matched_concept_ids, matched_scores, steps, project_id, created_at FROM consultations WHERE id = ?",
         [consultation_id],
     ).fetchone()
     if not row:
@@ -1331,7 +1401,8 @@ def get_consultation(consultation_id: str) -> dict | None:
         "matched_concept_ids": row[3],
         "matched_scores": row[4],
         "steps": _json.loads(row[5]) if row[5] else [],
-        "created_at": str(row[6]),
+        "project_id": row[6],
+        "created_at": str(row[7]),
     }
 
 

@@ -89,6 +89,7 @@ TOOL_DISPATCH = {
         project_description=args.get("project_description", ""),
         max_results=args.get("max_results", 15),
         similarity_threshold=args.get("similarity_threshold", 0.3),
+        project_id=args.get("project_id"),
     ),
     "triage_books": lambda args: triage_books(
         project_description=args.get("project_description", ""),
@@ -449,7 +450,12 @@ async def list_tools() -> list[Tool]:
                 "graph concepts via embedding similarity. Returns ranked concepts with scores "
                 "and creates a consultation_id that tracks the session. The same description "
                 "always produces the same concept ranking and fingerprint. Pass the returned "
-                "consultation_id to get_subgraph and ask_book for step logging."
+                "consultation_id to get_subgraph and ask_book for step logging. When "
+                "project_id is provided AND the project's unified KG has been built "
+                "(build_project_kg), the search runs against the per-project canonical "
+                "concept layer (deduplicated across triaged books) and returned concepts "
+                "carry member_concept_ids, role, and rubric_pattern_id. When project_id "
+                "is omitted, behaviour is identical to the legacy single-book path."
             ),
             inputSchema={
                 "type": "object",
@@ -465,6 +471,15 @@ async def list_tools() -> list[Tool]:
                     "similarity_threshold": {
                         "type": "number",
                         "description": "Minimum cosine similarity to include (0.0-1.0, default: 0.3)",
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Project ID from start_project. When provided and "
+                            "the project's unified KG is built, search runs against the "
+                            "project's canonical concept layer instead of the global "
+                            "concept space."
+                        ),
                     },
                 },
                 "required": ["project_description"],
