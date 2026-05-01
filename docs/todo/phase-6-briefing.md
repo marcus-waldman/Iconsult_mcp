@@ -13,23 +13,35 @@ The success criterion is **report quality**, not test coverage. Phase 6 should p
 ## Where we are
 
 ```
-feat/multi-book-kg  d16ce7d  Phase 5d: docs + tracking updates for Phase 5 closure
-                    c08d232  Phase 5c: stress-test badge coverage + live-render smoke script
-                    b53bce2  Phase 5c: provenance badges in rendered HTML report
-                    b1d7405  Phase 5b: source_book_id on every failure scenario
-                    38eeb0b  Phase 5a: surface provenance in score_architecture
-                    8ff27f8  docs: add Phase 5 briefing for fresh-session continuity
-                    5701300  Phase 4e: end-to-end project-scoped walkthrough verified
+feat/multi-book-kg  5374864  B6: demote DuckDB ALTER SEQUENCE noise from WARNING to DEBUG
+                    452dfee  B5: document score_architecture overall_summary key names
+                    aec64a5  B4: defensive coercion of JSON-encoded MCP tool args
+                    17adbbd  B3: validate tooltip shape at render_report entry point
+                    0adb02f  B2: critique no longer false-positives on match_concepts / failure scenarios
+                    3e7aab2  B1: read-time dedupe in _get_pattern_assessments (latest wins)
+                    14694e1  docs(phase-6): lock 6-Q1 to research-agent + bake in description
+                    7eecb77  docs: add Phase 6 briefing for fresh-session continuity
+                    d16ce7d  Phase 5d: docs + tracking updates for Phase 5 closure
+                    [...Phase 5a-5c, 4e above this line]
 main                a69968e
 ```
+
+Phase 6 was paused mid-stride at 6b on 2026-05-01: 6a setup completed (both projects exist with KG built) but the 6b script run surfaced four real plumbing bugs that would also bite the next consulting agent. Those bugs were fixed on a side branch `fix/phase-6-bugs` (commits `3e7aab2..5374864`) and merged back here. Phase 6 6b can now resume cleanly. See `phase-6-bugfix-briefing.md` for the full bugfix narrative.
 
 DB state at branch HEAD:
 
 - 2 books: `arsanjani_2026` (oracle, mid_level, 138 concepts) and `gulli_2025` (implementation, 180 concepts), both with summaries + 1536-dim summary_embeddings.
 - 94 alignment-cache rows (48 same_concept=True), all canonically ordered.
-- 1 demo project from the Phase 4e walkthrough: `proj_eed395e3a026` (Phase 4e Verification) with 273 canonical_concepts. Phase 6 will not reuse this project — it'll create a fresh one matched to the chosen target codebase. Safe to leave; safe to drop.
+- 3 projects: `proj_eed395e3a026` (Phase 4e demo, 273 canonical_concepts), `proj_e08f51f45bf7` (Phase 6 baseline — arsanjani only), `proj_3e48fe51e735` (Phase 6 multibook — arsanjani + gulli). Both Phase 6 projects have `unified_kg_built_at` set; 6b can pick up from either.
+- 1 dirty consultation row from the failed 6b attempt: `7465fccc4320_20260501_031252` on `proj_e08f51f45bf7` with 10 pattern_assessments. Safe to leave — fresh 6b runs mint new consultation_ids; the dirty row is harmless and serves as a diagnostic checkpoint.
 
-29 MCP tools registered. Test suite: **245/245** passing.
+29 MCP tools registered. Test suite: **275/275** passing (245 pre-bugfix + 30 new regression tests in B1-B6).
+
+Bugfix-branch capabilities now available that were not before 6b paused:
+- `log_pattern_assessment` is idempotent at the read layer — a re-log overrides prior assessments on the same `(consultation_id, pattern_id)`. The fresh-consultation-per-attempt workaround used by Phase 6 driver scripts is no longer required.
+- `critique_consultation` no longer false-positives on `match_concepts` (which is implicit in consultation existence) or on `generate_failure_scenarios` (which now logs a `failure_scenarios_generated` step for downstream detection).
+- `render_report` validates `tooltips_current`/`tooltips_target` shape at entry — bad shape returns a clean error instead of crashing deep in `_enrich_tooltips`.
+- The MCP server defensively JSON-decodes string-encoded array/integer/number/boolean args at the dispatch layer. Phase 6 6a/6b can run via MCP transport instead of the one-shot Python scripts (`setup_phase6a.py`, `run_phase6_discovery.py`, `run_phase6_consultation.py`); the scripts still work but are no longer mandatory.
 
 ## Locked design decisions — do not re-litigate
 
