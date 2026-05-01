@@ -41,15 +41,20 @@ DB state at branch HEAD:
 | **Rubric is immutable.** | The Ch. 12 rubric in `rubric_data.py` does not change in Phase 6. If multi-book scoring differs from single-book scoring on the rubric ratings, that's a sign of dilution — flag it. |
 | **Merge criterion is qualitative + quantitative.** | Quantitative gates listed below; subjective judgement on report readability matters too. The user (Marcus) makes the merge call after reading the memo. |
 
-## Target codebase — open question 6-Q1
+## Target codebase — 6-Q1 LOCKED (2026-05-01)
 
-We need a target codebase to consult against. Three options ranked by suitability:
+**Target:** the `research-agent` example from `anthropics/claude-agent-sdk-demos`.
+URL: https://github.com/anthropics/claude-agent-sdk-demos/tree/main/research-agent
 
-1. **`Iconsult_mcp` itself.** The agentic system we've been building. Pros: full source access, rich enough to exercise multiple rubric categories (supervisor/dispatch in `server.py`, retry/backoff in `escalation.py`, blackboard, events, validate_subagent, critique loop, etc.), the model has full context. Cons: meta — we'd be consulting on the system that produced the consultation, which can introduce confirmation bias.
-2. **`openai/openai-agents-python` `customer_service` example** (already in `tests/cases.py`). Pros: well-known, reasonably small, familiar. Cons: small enough that single-book might be sufficient — multi-book advantage may be hard to demonstrate.
-3. **A fresh real-world repo Marcus is currently working on.** Best signal — represents the actual use case — but requires Marcus to nominate one.
+Why this and not the alternatives originally considered (Iconsult_mcp itself; the `openai-agents-python customer_service` example): the agent-SDK research-agent is intentionally implementation-altitude (parallel subagent invocation via the `Task` tool, file-based handoffs to `files/research_notes/` etc., SDK hooks intercepting every tool call, `parent_tool_use_id` linking calls back to the spawning subagent for attribution). That's gulli_2025's territory by construction — if multi-book provides any advantage at all, this codebase should surface it. It's also small enough to consult comprehensively in a session, and external enough to dodge the confirmation-bias risk of consulting on Iconsult_mcp itself.
 
-**Recommendation: option 1 (Iconsult_mcp itself)** for the first comparison. It's the richest target available without external choice, and the consultation report is a useful artifact for the project regardless. Acknowledge confirmation-bias risk in the memo. If the result is ambiguous, fall back to option 3 with Marcus picking a real repo as a tiebreaker.
+**Project description (use VERBATIM as `project_description` for both consultations — apples-to-apples):**
+
+> A multi-agent research system built on the Claude Agent SDK. A Lead Agent decomposes a research request into 2–4 subtopics and orchestrates three specialist subagent roles via the `Task` tool: Researcher subagents (WebSearch + Write) gather information in parallel and persist findings to `files/research_notes/`; a Data Analyst subagent (Glob/Read/Bash/Write) extracts metrics from those notes and generates matplotlib chart PNGs in `files/charts/`; a Report Writer subagent (Skill/Write/Glob/Read/Bash) compiles a final PDF in `files/reports/`. SDK hooks (`pre_tool_use`, `post_tool_use`) intercept every tool call to log a `transcript.txt` and structured `tool_calls.jsonl` per session, with `parent_tool_use_id` linking calls back to the spawning subagent for attribution. Slash commands (`/research`, `/competitive-analysis`, `/market-trends`, `/fact-check`, `/summarize`) route different research patterns. Built for parallel subagent execution with deterministic file-based handoffs between roles.
+
+The description was drafted from the README. **Before locking it into 6a, the agent should clone the demos repo, walk `research-agent/` source (agent.py, prompts/, utils/, .claude/), and verify the description matches reality.** If the source reveals material content the README omits (retry logic, shared state, supervision tree, error handling), revise the description and update *both consultations' input* to keep apples-to-apples. The description above is a starting point, not a contract.
+
+Expected rubric coverage: **strong** on Coordination & Planning (lead agent decomposition + supervisor architecture + Task delegation), Agent-Level Capabilities (function calling, structured task execution), Human-Agent Interaction (`agent_delegates_to_agent` is literally the lead→researcher pattern), Explainability (hooks + transcript logs = basic_audit_logging). Expected rubric coverage: **weak/missing** on Robustness & Fault Tolerance (no retry, no watchdog, no fallback model, no failure recovery visible in README) — this is the key gap to test the dilution invariant: if multi-book scores Robustness differently from single-book *on the rubric ratings*, that's a problem, but multi-book should surface *more* gulli-sourced evidence about robustness gaps in the failure_scenarios output.
 
 ## Phase 6 scope
 
@@ -152,9 +157,9 @@ If Phase 6 reveals a real bug or missing feature (e.g., the canonical-name-in-ro
 
 ## Open questions
 
-### 6-Q1: Which codebase to consult on?
+### 6-Q1: Which codebase to consult on? — LOCKED
 
-Recommendation above: `Iconsult_mcp` itself first; fall back to a real repo Marcus picks if the result is ambiguous. **Lock this at session start before 6a.**
+Locked 2026-05-01: **`anthropics/claude-agent-sdk-demos/research-agent`**. See the "Target codebase" section above for the project description and rationale.
 
 ### 6-Q2: Are both consultations done by the agent autonomously, or by Marcus driving the agent?
 
@@ -219,5 +224,12 @@ git log --oneline -10                           # confirm d16ce7d at top
 py -m pytest tests/ -q                          # 245 passing
 py -m iconsult_mcp.server --check 2>&1 | tail -3   # confirm 29 tools
 
-# Then lock 6-Q1 (target codebase) before running anything else.
+# 6-Q1 is locked: target is anthropics/claude-agent-sdk-demos/research-agent.
+# Clone the demos repo to a temp dir and walk research-agent/ source
+# (agent.py, prompts/, utils/, .claude/, README) BEFORE 6a. The project
+# description in the "Target codebase" section above came from the README;
+# verify it matches the source. Flag any material gaps before locking the
+# description into start_project — both consultations need the same input.
+git clone https://github.com/anthropics/claude-agent-sdk-demos /tmp/csd-demos
+ls /tmp/csd-demos/research-agent/research_agent/
 ```
