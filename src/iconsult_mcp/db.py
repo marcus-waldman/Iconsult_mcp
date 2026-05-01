@@ -188,11 +188,16 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
     except Exception:
         pass  # Column already exists
 
-    # Sync sequence with existing data
+    # Sync sequence with existing data. Best-effort: DuckDB does not yet
+    # support `ALTER SEQUENCE ... RESTART WITH` (raises NotImplementedException
+    # on every connection); demote that specific case to DEBUG so the noise
+    # stops, but leave WARNING for any other unexpected failure mode.
     try:
         max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM relationships").fetchone()[0]
         if max_id > 0:
             conn.execute(f"ALTER SEQUENCE relationships_id_seq RESTART WITH {max_id + 1}")
+    except duckdb.NotImplementedException as e:
+        logger.debug(f"relationships_id_seq sync skipped (DuckDB ALTER SEQUENCE unsupported): {e}")
     except Exception as e:
         logger.warning(f"Could not sync relationships_id_seq: {e}")
 
@@ -279,7 +284,8 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
-    # Sync events sequence with existing data
+    # Sync events sequence with existing data. Same DuckDB limitation as
+    # relationships_id_seq above — demote NotImplementedException to DEBUG.
     try:
         max_eid = conn.execute(
             "SELECT COALESCE(MAX(id), 0) FROM consultation_events"
@@ -288,6 +294,8 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
             conn.execute(
                 f"ALTER SEQUENCE consultation_events_id_seq RESTART WITH {max_eid + 1}"
             )
+    except duckdb.NotImplementedException as e:
+        logger.debug(f"consultation_events_id_seq sync skipped (DuckDB ALTER SEQUENCE unsupported): {e}")
     except Exception as e:
         logger.warning(f"Could not sync consultation_events_id_seq: {e}")
 
