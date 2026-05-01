@@ -114,6 +114,12 @@ def _get_pattern_assessments(record: dict) -> dict[str, dict]:
 
     Normalises each pattern_id via aliases so that lookups by either old
     MATURITY_MODEL IDs, KG concept IDs, or new rubric IDs all succeed.
+
+    Latest wins: when the same canonical pattern_id is assessed more than
+    once (the underlying step log is intentionally append-only for audit /
+    critique purposes), the most recent step supersedes earlier ones. This
+    makes ``log_pattern_assessment`` idempotent at the read layer without
+    losing the audit trail.
     """
     assessments: dict[str, dict] = {}
     for step in record.get("steps", []):
@@ -122,10 +128,8 @@ def _get_pattern_assessments(record: dict) -> dict[str, dict]:
             if not raw_pid:
                 continue
             canonical = normalize_pattern_id(raw_pid)
-            # Store under canonical ID (and raw ID as fallback)
-            if canonical not in assessments:
-                assessments[canonical] = step
-            if raw_pid != canonical and raw_pid not in assessments:
+            assessments[canonical] = step
+            if raw_pid != canonical:
                 assessments[raw_pid] = step
     return assessments
 
