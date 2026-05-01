@@ -16,6 +16,7 @@ This file is the canonical scope spec. Each section below is referenced from a c
 - [ ] **B8a — Footer attribution should reflect actual triaged books, not hardcoded Arsanjani**
 - [ ] **B8b — Scorecard tooltips: many patterns have no description; chapter refs lack book qualifier on multi-book consultations**
 - [ ] **B8c — Implementation Recommendations need "why this matters for your system" + per-card citations**
+- [ ] **B9 — `generate_implementation_plan` should leverage cross-book canonical clusters for concrete code-level steps**
 
 ---
 
@@ -178,15 +179,76 @@ The "fall back to rubric description" path is a soft scope hazard — `rubric_da
 
 ---
 
+---
+
+## B9 — `generate_implementation_plan` should leverage cross-book canonical clusters
+
+### Symptom
+
+`generate_implementation_plan` currently produces a phased markdown checklist of "mechanical" vs "design_decision" steps from the consultation's gap analysis. The plan generator was authored when the corpus was single-book (arsanjani, mid-level / architectural altitude), so its steps are uniformly framed at architectural altitude — appropriate for arsanjani's content but underleveraging gulli's implementation-altitude content when the consultation's project is multi-book.
+
+For Phase 6 6c (multi-book), the consultation already attributed three patterns to gulli (`agent_delegates_to_agent`, `simple_retry`, `shared_epistemic_memory`). The implementation plan for those gaps would naturally benefit from gulli's concrete code-level coverage — but the plan generator doesn't know to pull from there.
+
+### Root cause
+
+`generate_implementation_plan` reads from the consultation's gap analysis but not from the per-project canonical layer. It has no visibility into:
+
+- Which gaps' source evidence came from gulli (`source_book_id` on the assessment)
+- Which canonical clusters span both books (`canonical_concepts.member_concept_ids` length > 1)
+- Which member concepts have rich gulli sections that could anchor concrete code patterns
+
+The "mechanical" classification heuristic likely also under-counts mechanical steps for gulli-sourced gaps because gulli's content is more actionable than arsanjani's, but the heuristic doesn't see that.
+
+### Suggested fix (sketch — design call before implementing)
+
+Two complementary directions, either or both:
+
+- **(B9-1) Provenance-aware step generation.** When the consultation's `project_id` has multiple triaged books and a gap's `source_book_id` is non-arsanjani, look up the canonical cluster's gulli member(s) and include section references from gulli's KG as concrete code anchors. Rendered as bullet sub-points under each mechanical step.
+- **(B9-2) Cross-book cluster splice.** For each gap whose `canonical_concept_id` resolves to a multi-member cluster, surface a "see also" line citing the alternate book's framing. This is the inverse use case: even an arsanjani-attributed gap can benefit from "the gulli equivalent here is X."
+
+Both leverage data already in the schema (`canonical_concepts.member_concept_ids`, `assessment.canonical_concept_id`, `concepts.section_id`, `sections.content`). No new tables or columns.
+
+### Files
+
+- `src/iconsult_mcp/tools/implementation_plan.py` — step generator + classification
+- `src/iconsult_mcp/tools/get_subgraph.py` — already canonical-cluster-aware; can reuse `_expand_canonical_to_members`
+- `tests/test_implementation_plan*.py` — extend with multi-book regression tests
+- New: live demo script `scripts/verify_b9.py` mirroring the verify_phase4e/5c shape so the multi-book implementation plan is eyeballable
+
+### Scope risk
+
+Medium-to-high. This is the largest of the four follow-ups by far — it's not a render-layer fix, it's tool-layer logic that interacts with the rubric, the canonical layer, and the existing classification heuristic. Likely needs its own briefing doc before implementation begins.
+
+The "mechanical vs design_decision" classification ought to be re-examined under multi-book — the heuristic was tuned for arsanjani's altitude and may misclassify gulli-sourced steps.
+
+### Effort
+
+~4-8 hours, possibly more depending on classification re-tuning. Not a polish branch sibling of B8a/b/c — needs its own treatment.
+
+### Acceptance criteria
+
+- For multi-book consultations, the generated implementation plan cites gulli sections (or other non-oracle book sections) where the assessment provenance + canonical cluster membership justify it.
+- Mechanical steps for gulli-sourced gaps anchor to specific code-level guidance from gulli content.
+- Single-book consultations: byte-identical plan output to current behaviour (no regression).
+- Live demo (`verify_b9.py`) shows side-by-side single-book vs multi-book plans for the same consultation, making the cross-book leverage visible.
+
+### Why this matters
+
+The Phase 6 comparison memo's qualitative read flagged this as the **largest projected post-merge multi-book payoff**: the consultation report stage shows multi-book is additive; the implementation-plan stage is where the implementation-altitude corpus content really lands. This issue captures that opportunity so it doesn't get lost.
+
+---
+
 ## Recommended ordering
 
-If a single side branch picks all three up:
+If a single side branch picks B8a/b/c up:
 
 1. **B8a first** — cheapest, no dependencies, immediately improves both Phase 6 reports.
 2. **B8b second** — produces the source-prefixed citation primitives B8c depends on.
 3. **B8c third** — builds on both predecessors.
 
 Each as a separate commit. Branch off `feat/multi-book-kg` (or off `main` after the multi-book merge — same diff). Re-render the Phase 6 reports against the polished pipeline; the consultation_ids in the DB make this a one-liner.
+
+**B9 is its own initiative** — separate from the B8 polish branch. Likely benefits from a fresh briefing doc (`docs/todo/b9-briefing.md`) before implementation. Not blocked by the B8 work but doesn't share much code path with it either.
 
 ## What does NOT change
 
