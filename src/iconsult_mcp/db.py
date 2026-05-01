@@ -1733,39 +1733,46 @@ def search_sections_by_embedding(
     query_embedding: list[float],
     max_results: int = 5,
     concept_ids: list[str] | None = None,
+    book_ids: list[str] | None = None,
 ) -> list[dict]:
     """Cosine similarity search over section embeddings.
 
-    Optionally scoped to sections linked to given concept_ids.
+    Optionally scoped to sections linked to given concept_ids and/or sections
+    belonging to given book_ids (Phase 4c: project-scoped passage retrieval).
+    Both filters are AND-ed when supplied together.
     """
     conn = get_connection()
     dims = EMBEDDING_DIMENSIONS
 
+    where_clauses: list[str] = []
+    params: list = [query_embedding]
+
+    join_clause = "FROM section_embeddings se JOIN sections s ON se.section_id = s.id"
+    select_distinct = "SELECT"
     if concept_ids:
+        join_clause += " JOIN concept_sections cs ON cs.section_id = s.id"
+        select_distinct = "SELECT DISTINCT"
         placeholders = ", ".join("?" for _ in concept_ids)
-        results = conn.execute(f"""
-            SELECT DISTINCT
-                s.id, s.title, s.chapter_number, s.part_number,
-                s.approx_page_start, s.approx_page_end, s.content,
-                array_cosine_similarity(se.embedding, ?::FLOAT[{dims}]) as score
-            FROM section_embeddings se
-            JOIN sections s ON se.section_id = s.id
-            JOIN concept_sections cs ON cs.section_id = s.id
-            WHERE cs.concept_id IN ({placeholders})
-            ORDER BY score DESC
-            LIMIT ?
-        """, [query_embedding, *concept_ids, max_results]).fetchall()
-    else:
-        results = conn.execute(f"""
-            SELECT
-                s.id, s.title, s.chapter_number, s.part_number,
-                s.approx_page_start, s.approx_page_end, s.content,
-                array_cosine_similarity(se.embedding, ?::FLOAT[{dims}]) as score
-            FROM section_embeddings se
-            JOIN sections s ON se.section_id = s.id
-            ORDER BY score DESC
-            LIMIT ?
-        """, [query_embedding, max_results]).fetchall()
+        where_clauses.append(f"cs.concept_id IN ({placeholders})")
+        params.extend(concept_ids)
+    if book_ids:
+        placeholders = ", ".join("?" for _ in book_ids)
+        where_clauses.append(f"s.book_id IN ({placeholders})")
+        params.extend(book_ids)
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    params.append(max_results)
+
+    results = conn.execute(f"""
+        {select_distinct}
+            s.id, s.title, s.chapter_number, s.part_number,
+            s.approx_page_start, s.approx_page_end, s.content, s.book_id,
+            array_cosine_similarity(se.embedding, ?::FLOAT[{dims}]) as score
+        {join_clause}
+        {where_sql}
+        ORDER BY score DESC
+        LIMIT ?
+    """, params).fetchall()
 
     return [
         {
@@ -1776,7 +1783,8 @@ def search_sections_by_embedding(
             "approx_page_start": r[4],
             "approx_page_end": r[5],
             "content": r[6],
-            "score": round(r[7], 4) if r[7] else 0.0,
+            "book_id": r[7],
+            "score": round(r[8], 4) if r[8] else 0.0,
         }
         for r in results
     ]

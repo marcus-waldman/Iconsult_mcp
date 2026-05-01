@@ -132,6 +132,7 @@ TOOL_DISPATCH = {
         concept_ids=args.get("concept_ids"),
         max_passages=args.get("max_passages", 3),
         consultation_id=args.get("consultation_id"),
+        project_id=args.get("project_id"),
     ),
     "consultation_report": lambda args: consultation_report(
         consultation_id=args.get("consultation_id", ""),
@@ -706,7 +707,11 @@ async def list_tools() -> list[Tool]:
                 "question and returns the most relevant book passages with full text, chapter, "
                 "page numbers, and section title. ALWAYS scope with concept_ids from "
                 "get_subgraph for precision. Returns suggested_questions derived deterministically "
-                "from graph edges. Pass consultation_id to log retrieval steps."
+                "from graph edges. Pass consultation_id to log retrieval steps. When the "
+                "consultation was opened with a project_id (or project_id is passed explicitly here) "
+                "AND the project's unified KG has been built, passage search is scoped to the "
+                "project's triaged_book_ids and any caller-supplied canonical concept_ids are "
+                "expanded to their source-book members; passages carry book_id provenance."
             ),
             inputSchema={
                 "type": "object",
@@ -718,7 +723,7 @@ async def list_tools() -> list[Tool]:
                     "concept_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional: scope search to sections linked to these concept IDs",
+                        "description": "Optional: scope search to sections linked to these concept IDs. When project-scoped, these are canonical concept IDs that get expanded to source-book members.",
                     },
                     "max_passages": {
                         "type": "integer",
@@ -726,7 +731,11 @@ async def list_tools() -> list[Tool]:
                     },
                     "consultation_id": {
                         "type": "string",
-                        "description": "Optional consultation ID from match_concepts to log this step",
+                        "description": "Optional consultation ID from match_concepts to log this step. If the consultation is project-scoped, project_id is auto-picked up from the row.",
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional. Project ID from start_project. When provided and the project's unified KG is built, passage search is scoped to the project's triaged_book_ids and canonical concept_ids are expanded to members. Usually unnecessary — picked up automatically from the consultation row.",
                     },
                 },
                 "required": ["question"],
