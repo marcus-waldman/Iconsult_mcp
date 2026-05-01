@@ -24,6 +24,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `py scripts/run_pipeline.py --book arsanjani_2026` — run full pipeline for one book (default `arsanjani_2026`)
 - `py -m pytest tests/ -v` — run integration tests (requires OPENAI_API_KEY + ANTHROPIC_API_KEY)
 - `py -m pytest tests/test_match_concepts.py -v` — run concept matching tests only
+- `py -u scripts/verify_phase4e.py` — Phase 4 end-to-end smoke test against live arsanjani_2026 + gulli_2025 corpus (project setup → KG build → match → traverse → ask → assess with provenance → score). Re-runnable; project_id deterministic from name+description so artifacts persist across runs
 
 ## Testing
 - Integration tests in `tests/` — require OPENAI_API_KEY and ANTHROPIC_API_KEY env vars
