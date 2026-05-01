@@ -9,6 +9,7 @@ solution, consequences, guidance, implementation example) are discarded.
 Named sub-entries (like "Blackboard Knowledge Hub") become their own nodes.
 """
 
+import argparse
 import hashlib
 import re
 import sys
@@ -17,8 +18,10 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from iconsult_mcp.config import LITERATURE_DIR, INDEX_FILENAME
+from iconsult_mcp.config import get_book_paths, list_registered_books
 from iconsult_mcp.db import get_connection
+
+DEFAULT_BOOK_ID = "arsanjani_2026"
 
 # Sub-entry labels that are structural metadata, not standalone concepts
 STRUCTURAL_SUBENTRIES = {
@@ -46,13 +49,22 @@ INLINE_PAGE_RE = re.compile(r"^(.+?)\s+(\d[\d, \-]+)$")
 
 
 def slugify(name: str) -> str:
-    """Convert a concept name to a slug ID."""
+    """Convert a concept name to a bare slug (no book prefix)."""
     slug = name.lower().strip()
     slug = re.sub(r"[^a-z0-9]+", "_", slug)
     slug = slug.strip("_")
     if len(slug) > 80:
         slug = slug[:80] + "_" + hashlib.md5(name.encode()).hexdigest()[:6]
     return slug
+
+
+def make_concept_id(book_id: str, name: str) -> str:
+    """Generate a book-namespaced concept ID: `{book_id}__{slug}`.
+
+    The `__` separator is reserved (config.BOOKS keys must not contain it).
+    `normalize_pattern_id()` strips this prefix when looking up rubric aliases.
+    """
+    return f"{book_id}__{slugify(name)}"
 
 
 def parse_page_refs(text: str) -> list[int]:
@@ -104,10 +116,10 @@ def is_structural_subentry(name: str) -> bool:
     return False
 
 
-def parse_index(index_path: Path) -> list[dict]:
+def parse_index(index_path: Path, book_id: str) -> list[dict]:
     """Parse the INDEX.md file and extract concepts with page references.
 
-    Returns a list of dicts with keys: name, pages, id.
+    Returns a list of dicts with keys: name, pages, id (book-namespaced).
     """
     text = index_path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -246,7 +258,7 @@ def parse_index(index_path: Path) -> list[dict]:
         if re.match(r"^\d+[-–]\d+$", name):
             continue
 
-        concept_id = slugify(name)
+        concept_id = make_concept_id(book_id, name)
         result.append({
             "id": concept_id,
             "name": name,
@@ -258,55 +270,67 @@ def parse_index(index_path: Path) -> list[dict]:
     return result
 
 
-def insert_concepts(concepts: list[dict]):
-    """Insert parsed concepts into the database."""
+def insert_concepts(concepts: list[dict], book_id: str, index_path: Path):
+    """Insert parsed concepts (book-scoped) into the database."""
     conn = get_connection()
 
-    # Check pipeline metadata for idempotency
+    metadata_key = f"index_hash:{book_id}"
     existing = conn.execute(
-        "SELECT value FROM pipeline_metadata WHERE key = 'index_hash'"
+        "SELECT value FROM pipeline_metadata WHERE key = ?",
+        [metadata_key],
     ).fetchone()
 
-    index_path = LITERATURE_DIR / INDEX_FILENAME
     import hashlib as hl
     current_hash = hl.md5(index_path.read_bytes()).hexdigest()
 
     if existing and existing[0] == current_hash:
-        print(f"Index already parsed (hash {current_hash[:8]}). Skipping.")
+        print(f"Index already parsed for {book_id} (hash {current_hash[:8]}). Skipping.")
         return
 
-    # Clear existing concepts (re-parse)
-    conn.execute("DELETE FROM concepts")
+    # Clear this book's concepts only
+    conn.execute("DELETE FROM concepts WHERE book_id = ?", [book_id])
 
     inserted = 0
     for c in concepts:
         try:
             conn.execute(
-                "INSERT INTO concepts (id, name, page_references) VALUES (?, ?, ?)",
-                [c["id"], c["name"], c["pages"]],
+                "INSERT INTO concepts (id, name, page_references, book_id) VALUES (?, ?, ?, ?)",
+                [c["id"], c["name"], c["pages"], book_id],
             )
             inserted += 1
         except Exception as e:
             # Handle duplicate IDs from slugification collisions
             print(f"  Warning: skipping duplicate concept '{c['name']}': {e}")
 
-    # Record hash
-    conn.execute("""
-        INSERT OR REPLACE INTO pipeline_metadata (key, value)
-        VALUES ('index_hash', ?)
-    """, [current_hash])
+    conn.execute(
+        "INSERT OR REPLACE INTO pipeline_metadata (key, value) VALUES (?, ?)",
+        [metadata_key, current_hash],
+    )
 
-    print(f"Inserted {inserted} concepts from index.")
+    print(f"Inserted {inserted} concepts from index for {book_id}.")
 
 
 def main():
-    index_path = LITERATURE_DIR / INDEX_FILENAME
+    parser = argparse.ArgumentParser(description="Parse a book INDEX into the concepts table.")
+    parser.add_argument(
+        "--book",
+        default=DEFAULT_BOOK_ID,
+        help=f"Book ID from config.BOOKS (default: {DEFAULT_BOOK_ID}).",
+    )
+    args = parser.parse_args()
+    book_id = args.book
+
+    paths = get_book_paths(book_id)
+    index_path = paths["index"]
     if not index_path.exists():
-        print(f"ERROR: Index file not found: {index_path}")
+        print(
+            f"ERROR: Index file not found for book '{book_id}': {index_path}\n"
+            f"Registered books: {list_registered_books()}"
+        )
         sys.exit(1)
 
-    print(f"Parsing index: {index_path.name}")
-    concepts = parse_index(index_path)
+    print(f"Parsing index for {book_id}: {index_path.name}")
+    concepts = parse_index(index_path, book_id)
     print(f"Found {len(concepts)} concepts")
 
     # Print sample
@@ -315,7 +339,7 @@ def main():
     if len(concepts) > 10:
         print(f"  ... and {len(concepts) - 10} more")
 
-    insert_concepts(concepts)
+    insert_concepts(concepts, book_id, index_path)
 
 
 if __name__ == "__main__":

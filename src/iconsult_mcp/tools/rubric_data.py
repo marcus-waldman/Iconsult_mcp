@@ -485,6 +485,7 @@ _PATTERN_ID_ALIASES: dict[str, str] = {
     "tool_use_pattern": "single_agent_baseline",  # part of baseline
     "adaptive_retry_pattern": "simple_retry",
     "structured_reasoning_and_self": "fractal_cot_embedding",
+    "fcot_pattern": "fractal_cot_embedding",
     "instruction_fidelity_auditing_pattern": "instruction_fidelity_auditing",
     "adaptive_retry_with_prompt_mutation": "adaptive_retry_with_prompt_mutation",
     "supervisor_architecture": "supervisor_architecture",
@@ -505,6 +506,9 @@ _PATTERN_ID_ALIASES: dict[str, str] = {
     "supervision_tree_with_guarded_capabilities": "supervisor_architecture",  # subsumed
     # Old failure template IDs -> rubric IDs
     "auto_healing_pattern": "auto_healing_agent_resuscitation",
+    "auto_healing": "auto_healing_agent_resuscitation",
+    "audit_trail_pattern": "basic_audit_logging",
+    "agent_specific_context_and_memory": "agent_specific_memory",
     "fallback_model_invocation_pattern": "fallback_model_invocation",
     "canary_agent_testing_pattern": "canary_agent_testing",
     "trust_decay_pattern": "trust_decay_and_scoring",
@@ -574,8 +578,23 @@ ALL_PATTERN_IDS: set[str] = {
 
 
 def normalize_pattern_id(pid: str) -> str:
-    """Resolve aliases to canonical rubric ID."""
-    return _PATTERN_ID_ALIASES.get(pid, pid)
+    """Resolve aliases to canonical rubric ID.
+
+    Multi-book aware: if `pid` carries a `{book_id}__` prefix (introduced in
+    Phase 1c so concept IDs don't collide across books), the prefix is
+    stripped before alias / canonical lookup. So both
+    `arsanjani_2026__supervisor_architecture` and `supervisor_architecture`
+    resolve to the same canonical rubric ID.
+    """
+    if pid in _PATTERN_ID_ALIASES:
+        return _PATTERN_ID_ALIASES[pid]
+    if "__" in pid:
+        suffix = pid.split("__", 1)[1]
+        if suffix in _PATTERN_ID_ALIASES:
+            return _PATTERN_ID_ALIASES[suffix]
+        if suffix in ALL_PATTERN_IDS:
+            return suffix
+    return pid
 
 
 def get_pattern_indicators(pattern_id: str) -> list[str]:

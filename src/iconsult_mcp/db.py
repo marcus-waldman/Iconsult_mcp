@@ -1,8 +1,11 @@
 """
-DuckDB/MotherDuck database module for the knowledge graph.
+Local DuckDB database module for the knowledge graph.
 
-Handles connection management (singleton) and schema initialization
-for all knowledge graph tables.
+Handles connection management (singleton) and schema initialization for all
+knowledge graph tables.
+
+The database is a local file (path resolved by config.get_db_path). MotherDuck
+is no longer a deployment target — see docs/multi-book-architecture-plan.md.
 """
 
 import logging
@@ -10,46 +13,23 @@ from typing import Optional
 
 import duckdb
 
-from iconsult_mcp.config import (
-    EMBEDDING_DIMENSIONS,
-    MOTHERDUCK_DATABASE,
-    MOTHERDUCK_SHARE_URL,
-    get_motherduck_token,
-)
+from iconsult_mcp.config import EMBEDDING_DIMENSIONS, get_db_path
 
 logger = logging.getLogger(__name__)
 
 _connection: Optional[duckdb.DuckDBPyConnection] = None
 _vss_available: bool = False
-_is_share: bool = False
 _step_buffer: dict[str, list[dict]] = {}
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
-    """Get or create MotherDuck DuckDB connection (singleton).
-
-    Tries to connect as the database owner first. If that fails (e.g. the
-    user doesn't own the database), falls back to attaching the public share
-    in read-only mode.
-    """
-    global _connection, _is_share
+    """Get or create the local DuckDB connection (singleton)."""
+    global _connection
     if _connection is None:
-        token = get_motherduck_token()
-        if not token:
-            raise ValueError(
-                "MOTHERDUCK_TOKEN environment variable is not set. "
-                "Get a token from https://app.motherduck.com/settings"
-            )
-        try:
-            _connection = duckdb.connect(f"md:{MOTHERDUCK_DATABASE}?motherduck_token={token}")
-            _is_share = False
-            _init_schema(_connection)
-        except Exception as e:
-            logger.info(f"Could not open database directly ({e}), attaching public share")
-            _connection = duckdb.connect(f"md:?motherduck_token={token}")
-            _connection.execute(f"ATTACH 'md:{MOTHERDUCK_SHARE_URL}'")
-            _connection.execute(f"USE {MOTHERDUCK_DATABASE}")
-            _is_share = True
+        path = get_db_path()
+        _connection = duckdb.connect(path)
+        logger.info(f"Opened local DuckDB at {path}")
+        _init_schema(_connection)
     return _connection
 
 
@@ -95,16 +75,54 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
+    # --- books: corpus catalogue (multi-book refactor, Phase 1a) ---
+    # One row per ingested book. The summary_embedding powers triage in Phase 2;
+    # is_oracle marks the book whose Ch. 12 supplies the scoring rubric.
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS books (
+            id VARCHAR PRIMARY KEY,
+            title VARCHAR NOT NULL,
+            authors VARCHAR,
+            year INTEGER,
+            summary TEXT,
+            summary_embedding FLOAT[{dims}],
+            altitude VARCHAR,
+            is_oracle BOOLEAN DEFAULT FALSE,
+            chapter_boundaries JSON,
+            created_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+
     # --- concepts: graph nodes ---
+    # Multi-book design: `(name, book_id)` UNIQUE, not `name` alone — the
+    # same concept name can legitimately appear in multiple books, and
+    # Phase 3 alignment is what reconciles them across books. Existing
+    # databases created before this design migrate via
+    # `_migrate_concepts_name_unique` below.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS concepts (
             id VARCHAR PRIMARY KEY,
-            name VARCHAR UNIQUE NOT NULL,
+            name VARCHAR NOT NULL,
             definition TEXT,
             category VARCHAR,
-            page_references INTEGER[]
+            page_references INTEGER[],
+            book_id VARCHAR,
+            UNIQUE (name, book_id)
         )
     """)
+
+    # Migrate: add book_id column if missing (multi-book refactor, Phase 1a).
+    # Initially nullable; populated by the rebuilt pipeline in Stage 1c. Skipped
+    # silently when the column already exists (fresh DBs hit the new CREATE).
+    try:
+        conn.execute("ALTER TABLE concepts ADD COLUMN book_id VARCHAR")
+        logger.info("Added book_id column to concepts table")
+    except Exception:
+        pass  # Column already exists
+
+    # Migrate: drop legacy column-level UNIQUE on `name`, install composite
+    # UNIQUE on (name, book_id). Idempotent — see helper docstring.
+    _migrate_concepts_name_unique(conn)
 
     # --- sections: book sections ---
     conn.execute("""
@@ -126,6 +144,13 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
     try:
         conn.execute("ALTER TABLE sections ADD COLUMN content TEXT")
         logger.info("Added content column to sections table")
+    except Exception:
+        pass  # Column already exists
+
+    # Migrate: add book_id column if missing (multi-book refactor, Phase 1a)
+    try:
+        conn.execute("ALTER TABLE sections ADD COLUMN book_id VARCHAR")
+        logger.info("Added book_id column to sections table")
     except Exception:
         pass  # Column already exists
 
@@ -156,11 +181,23 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
-    # Sync sequence with existing data
+    # Migrate: add book_id column if missing (multi-book refactor, Phase 1a)
+    try:
+        conn.execute("ALTER TABLE relationships ADD COLUMN book_id VARCHAR")
+        logger.info("Added book_id column to relationships table")
+    except Exception:
+        pass  # Column already exists
+
+    # Sync sequence with existing data. Best-effort: DuckDB does not yet
+    # support `ALTER SEQUENCE ... RESTART WITH` (raises NotImplementedException
+    # on every connection); demote that specific case to DEBUG so the noise
+    # stops, but leave WARNING for any other unexpected failure mode.
     try:
         max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM relationships").fetchone()[0]
         if max_id > 0:
             conn.execute(f"ALTER SEQUENCE relationships_id_seq RESTART WITH {max_id + 1}")
+    except duckdb.NotImplementedException as e:
+        logger.debug(f"relationships_id_seq sync skipped (DuckDB ALTER SEQUENCE unsupported): {e}")
     except Exception as e:
         logger.warning(f"Could not sync relationships_id_seq: {e}")
 
@@ -198,6 +235,10 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
                 logger.debug(f"Could not create HNSW index on {table}: {e}")
 
     # --- consultations: reproducible consultation sessions ---
+    # `project_id` (nullable) ties a consultation to a Phase 3 `projects` row so
+    # the Phase 4 read tools (match_concepts / get_subgraph / ask_book) can
+    # scope to the project's canonical layer. NULL = legacy single-book
+    # consultation (existing behaviour preserved).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS consultations (
             id VARCHAR PRIMARY KEY,
@@ -206,9 +247,19 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
             matched_concept_ids VARCHAR[] NOT NULL,
             matched_scores FLOAT[],
             steps JSON DEFAULT '[]',
+            project_id VARCHAR,
             created_at TIMESTAMP DEFAULT current_timestamp
         )
     """)
+
+    # Migrate: add `project_id` to legacy consultations rows. Idempotent —
+    # silently skipped when the column already exists (fresh DBs hit the new
+    # CREATE above).
+    try:
+        conn.execute("ALTER TABLE consultations ADD COLUMN project_id VARCHAR")
+        logger.info("Added project_id column to consultations table")
+    except Exception:
+        pass  # Column already exists
 
     # --- consultation_state: shared epistemic memory (upsert-by-key) ---
     conn.execute("""
@@ -233,7 +284,8 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
-    # Sync events sequence with existing data
+    # Sync events sequence with existing data. Same DuckDB limitation as
+    # relationships_id_seq above — demote NotImplementedException to DEBUG.
     try:
         max_eid = conn.execute(
             "SELECT COALESCE(MAX(id), 0) FROM consultation_events"
@@ -242,6 +294,8 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
             conn.execute(
                 f"ALTER SEQUENCE consultation_events_id_seq RESTART WITH {max_eid + 1}"
             )
+    except duckdb.NotImplementedException as e:
+        logger.debug(f"consultation_events_id_seq sync skipped (DuckDB ALTER SEQUENCE unsupported): {e}")
     except Exception as e:
         logger.warning(f"Could not sync consultation_events_id_seq: {e}")
 
@@ -288,7 +342,580 @@ def _init_schema(conn: duckdb.DuckDBPyConnection):
         )
     """)
 
+    # --- Phase 3a: per-project canonical layer ---------------------------------
+    # `projects` caches the triage outcome for a (name, description) pair. The
+    # unified KG (canonical_concepts) is built once per project and reused across
+    # follow-up consultations on the same project.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id VARCHAR PRIMARY KEY,
+            name VARCHAR NOT NULL,
+            description TEXT NOT NULL,
+            triaged_book_ids VARCHAR[],
+            unified_kg_built_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+
+    # `canonical_concepts` is the project-scoped alignment layer. Each row is a
+    # cluster of source concepts (from one or more triaged books) that the
+    # alignment step adjudicated as the same concept. `role` distinguishes
+    # supporting-evidence concepts (anchored to a Ch. 12 rubric pattern) from
+    # informational-only ones (enrich the consultation but never score).
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS canonical_concepts (
+            id VARCHAR PRIMARY KEY,
+            project_id VARCHAR NOT NULL,
+            name VARCHAR NOT NULL,
+            member_concept_ids VARCHAR[] NOT NULL,
+            role VARCHAR NOT NULL CHECK (role IN ('supporting_evidence', 'informational_only')),
+            rubric_pattern_id VARCHAR,
+            canonical_embedding FLOAT[{dims}]
+        )
+    """)
+
+    # `concept_alignment_cache` is global (NOT project-scoped). Two projects
+    # whose triaged book sets overlap reuse alignment verdicts from this cache,
+    # so the LLM cost of pairwise adjudication amortizes across the user base.
+    # Writer enforces canonical pair-order (concept_a.book_id < concept_b.book_id)
+    # so each pair has exactly one cache row.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS concept_alignment_cache (
+            concept_a_id VARCHAR NOT NULL,
+            concept_b_id VARCHAR NOT NULL,
+            same_concept BOOLEAN NOT NULL,
+            confidence FLOAT,
+            rationale TEXT,
+            created_at TIMESTAMP DEFAULT current_timestamp,
+            PRIMARY KEY (concept_a_id, concept_b_id)
+        )
+    """)
+
     logger.info("Schema initialized successfully")
+
+
+def _migrate_concepts_name_unique(conn: duckdb.DuckDBPyConnection) -> bool:
+    """Migrate concepts.name UNIQUE → UNIQUE(name, book_id). Idempotent.
+
+    The single-book schema enforced `name VARCHAR UNIQUE NOT NULL`. With
+    multi-book ingestion the same concept name legitimately appears in more
+    than one book (e.g., "MCP" in both Arsanjani 2026 and Gulli 2025), and
+    that's *exactly* what Phase 3 alignment reconciles. The old constraint
+    silently rejected the second-book copy, dropping the highest-confidence
+    cross-book alignment candidates.
+
+    Performs a table swap: create `concepts_new` with the new constraint,
+    copy all rows (`id` PKs preserved so soft references in
+    relationships / concept_sections / concept_embeddings keep working),
+    drop the old, rename. Wrapped in a transaction.
+
+    Returns True if the migration ran, False if the schema is already
+    correct (fresh DBs, or DBs already migrated).
+    """
+    rows = conn.execute(
+        """
+        SELECT constraint_type, constraint_column_names
+        FROM duckdb_constraints()
+        WHERE table_name = 'concepts'
+        """
+    ).fetchall()
+
+    has_old = False
+    has_new = False
+    for ctype, cols in rows:
+        if ctype != "UNIQUE":
+            continue
+        col_set = sorted(cols)
+        if col_set == ["name"]:
+            has_old = True
+        elif col_set == ["book_id", "name"]:
+            has_new = True
+
+    if has_new and not has_old:
+        return False  # already migrated (or fresh DB hit the new CREATE)
+    if not has_old:
+        return False  # neither — nothing to do
+
+    logger.info("Migrating concepts.name UNIQUE → UNIQUE(name, book_id)")
+
+    conn.execute("BEGIN")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE concepts_new (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                definition TEXT,
+                category VARCHAR,
+                page_references INTEGER[],
+                book_id VARCHAR,
+                UNIQUE (name, book_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO concepts_new
+                (id, name, definition, category, page_references, book_id)
+            SELECT id, name, definition, category, page_references, book_id
+            FROM concepts
+            """
+        )
+        conn.execute("DROP TABLE concepts")
+        conn.execute("ALTER TABLE concepts_new RENAME TO concepts")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+    logger.info("Migration complete: UNIQUE(name, book_id) installed on concepts")
+    return True
+
+
+# --- Books registry helpers --------------------------------------------------
+
+
+def upsert_book(
+    book_id: str,
+    title: str,
+    authors: str | None = None,
+    year: int | None = None,
+    altitude: str | None = None,
+    is_oracle: bool = False,
+    chapter_boundaries: dict | list | None = None,
+) -> None:
+    """Insert or replace a row in the `books` corpus catalogue.
+
+    Writes only metadata + chapter_boundaries. `summary` and
+    `summary_embedding` are not in the column list, so they are preserved
+    on re-seed (DuckDB's INSERT OR REPLACE keeps columns absent from the
+    INSERT). The canonical writer for those is `set_book_summary` — keep
+    metadata seeding and summary committing on separate paths so a re-seed
+    of metadata never nukes the embedding, and a re-commit of the summary
+    never nukes the metadata.
+
+    `chapter_boundaries` is JSON-serialized.
+    """
+    import json as _json
+
+    conn = get_connection()
+    boundaries_json = (
+        _json.dumps(chapter_boundaries) if chapter_boundaries is not None else None
+    )
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO books
+            (id, title, authors, year, altitude, is_oracle, chapter_boundaries)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [book_id, title, authors, year, altitude, is_oracle, boundaries_json],
+    )
+
+
+def set_book_summary(
+    book_id: str,
+    summary: str,
+    summary_embedding: list[float],
+) -> None:
+    """Update `summary` and `summary_embedding` for an existing book row.
+
+    Raises KeyError if the book row does not exist (run `seed_books_table.py`
+    first). Phase 2a writer; intentionally separate from `upsert_book` so a
+    re-seed of metadata never nukes the embedding, and a re-commit of the
+    summary never nukes the metadata.
+    """
+    conn = get_connection()
+    existing = conn.execute(
+        "SELECT 1 FROM books WHERE id = ?", [book_id]
+    ).fetchone()
+    if not existing:
+        raise KeyError(
+            f"Book '{book_id}' not found in books table. "
+            "Run `py scripts/seed_books_table.py` first."
+        )
+    conn.execute(
+        """
+        UPDATE books
+           SET summary = ?,
+               summary_embedding = ?
+         WHERE id = ?
+        """,
+        [summary, summary_embedding, book_id],
+    )
+
+
+def get_book(book_id: str) -> dict | None:
+    """Return the row for one book or None."""
+    import json as _json
+
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT id, title, authors, year, summary, altitude, is_oracle,
+               chapter_boundaries, created_at,
+               summary_embedding IS NOT NULL AS has_summary_embedding
+        FROM books
+        WHERE id = ?
+        """,
+        [book_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "title": row[1],
+        "authors": row[2],
+        "year": row[3],
+        "summary": row[4],
+        "altitude": row[5],
+        "is_oracle": row[6],
+        "chapter_boundaries": _json.loads(row[7]) if row[7] else None,
+        "created_at": row[8],
+        "has_summary_embedding": bool(row[9]),
+    }
+
+
+def list_books(altitude: str | None = None) -> list[dict]:
+    """Return all rows in the `books` table, optionally filtered by altitude."""
+    import json as _json
+
+    conn = get_connection()
+    if altitude is not None:
+        rows = conn.execute(
+            """
+            SELECT id, title, authors, year, altitude, is_oracle, chapter_boundaries
+            FROM books
+            WHERE altitude = ?
+            ORDER BY created_at
+            """,
+            [altitude],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT id, title, authors, year, altitude, is_oracle, chapter_boundaries
+            FROM books
+            ORDER BY created_at
+            """
+        ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "title": r[1],
+            "authors": r[2],
+            "year": r[3],
+            "altitude": r[4],
+            "is_oracle": r[5],
+            "chapter_boundaries": _json.loads(r[6]) if r[6] else None,
+        }
+        for r in rows
+    ]
+
+
+# --- Project / canonical layer helpers (Phase 3a) ----------------------------
+
+
+def create_project(
+    project_id: str,
+    name: str,
+    description: str,
+    triaged_book_ids: list[str] | None = None,
+) -> None:
+    """Insert or replace a row in the `projects` cache.
+
+    `unified_kg_built_at` is left NULL — `build_project_kg` (Phase 3c) sets it
+    after a successful alignment pass.
+    """
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO projects
+            (id, name, description, triaged_book_ids, unified_kg_built_at)
+        VALUES (?, ?, ?, ?, NULL)
+        """,
+        [project_id, name, description, triaged_book_ids or []],
+    )
+
+
+def get_project(project_id: str) -> dict | None:
+    """Return one project row or None."""
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT id, name, description, triaged_book_ids,
+               unified_kg_built_at, created_at
+        FROM projects
+        WHERE id = ?
+        """,
+        [project_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "name": row[1],
+        "description": row[2],
+        "triaged_book_ids": list(row[3]) if row[3] is not None else [],
+        "unified_kg_built_at": str(row[4]) if row[4] else None,
+        "created_at": str(row[5]) if row[5] else None,
+    }
+
+
+def list_projects() -> list[dict]:
+    """Return all project rows ordered by creation time."""
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT id, name, description, triaged_book_ids,
+               unified_kg_built_at, created_at
+        FROM projects
+        ORDER BY created_at
+        """
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "name": r[1],
+            "description": r[2],
+            "triaged_book_ids": list(r[3]) if r[3] is not None else [],
+            "unified_kg_built_at": str(r[4]) if r[4] else None,
+            "created_at": str(r[5]) if r[5] else None,
+        }
+        for r in rows
+    ]
+
+
+def mark_project_kg_built(project_id: str) -> None:
+    """Set `unified_kg_built_at = now` for a project. Called by `build_project_kg`."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE projects SET unified_kg_built_at = current_timestamp WHERE id = ?",
+        [project_id],
+    )
+
+
+def upsert_canonical_concept(
+    canonical_id: str,
+    project_id: str,
+    name: str,
+    member_concept_ids: list[str],
+    role: str,
+    rubric_pattern_id: str | None = None,
+    canonical_embedding: list[float] | None = None,
+) -> None:
+    """Insert or replace a canonical concept row.
+
+    Args:
+        canonical_id: `{project_id}__{slug}` PK.
+        project_id: Owning project.
+        name: Canonical name (usually from oracle book if a member maps there).
+        member_concept_ids: Source concepts (from various books) that resolve
+            here. Must contain at least one ID.
+        role: 'supporting_evidence' or 'informational_only'.
+        rubric_pattern_id: Canonical Ch. 12 pattern ID, or None if informational.
+        canonical_embedding: Mean of member embeddings (computed by caller).
+    """
+    if role not in ("supporting_evidence", "informational_only"):
+        raise ValueError(
+            f"role must be 'supporting_evidence' or 'informational_only', got {role!r}"
+        )
+    if not member_concept_ids:
+        raise ValueError("member_concept_ids must contain at least one concept ID")
+
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO canonical_concepts
+            (id, project_id, name, member_concept_ids, role,
+             rubric_pattern_id, canonical_embedding)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            canonical_id,
+            project_id,
+            name,
+            member_concept_ids,
+            role,
+            rubric_pattern_id,
+            canonical_embedding,
+        ],
+    )
+
+
+def get_canonical_concept(canonical_id: str) -> dict | None:
+    """Return one canonical concept row or None."""
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT id, project_id, name, member_concept_ids, role,
+               rubric_pattern_id,
+               canonical_embedding IS NOT NULL AS has_embedding
+        FROM canonical_concepts
+        WHERE id = ?
+        """,
+        [canonical_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "project_id": row[1],
+        "name": row[2],
+        "member_concept_ids": list(row[3]) if row[3] is not None else [],
+        "role": row[4],
+        "rubric_pattern_id": row[5],
+        "has_embedding": bool(row[6]),
+    }
+
+
+def list_canonical_concepts(project_id: str) -> list[dict]:
+    """Return all canonical concepts for a project."""
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT id, project_id, name, member_concept_ids, role,
+               rubric_pattern_id,
+               canonical_embedding IS NOT NULL AS has_embedding
+        FROM canonical_concepts
+        WHERE project_id = ?
+        ORDER BY name
+        """,
+        [project_id],
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "project_id": r[1],
+            "name": r[2],
+            "member_concept_ids": list(r[3]) if r[3] is not None else [],
+            "role": r[4],
+            "rubric_pattern_id": r[5],
+            "has_embedding": bool(r[6]),
+        }
+        for r in rows
+    ]
+
+
+def search_canonical_concepts_by_embedding(
+    query_embedding: list[float],
+    project_id: str,
+    max_results: int = 10,
+) -> list[dict]:
+    """Search a project's canonical_concepts by cosine similarity.
+
+    Project-scoped counterpart to `search_concepts_by_embedding`. Reads from
+    the per-project canonical layer populated by `build_project_kg`, so each
+    cluster appears once regardless of how many source-book concepts collapsed
+    into it. Used by Phase 4's project-scoped `match_concepts` path.
+
+    Args:
+        query_embedding: 1536-d query vector.
+        project_id: Restrict to canonical concepts owned by this project.
+        max_results: Maximum results to return.
+
+    Returns:
+        List of dicts: id, name, member_concept_ids, role, rubric_pattern_id, score.
+    """
+    conn = get_connection()
+    dims = EMBEDDING_DIMENSIONS
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            id, name, member_concept_ids, role, rubric_pattern_id,
+            array_cosine_similarity(canonical_embedding, ?::FLOAT[{dims}]) as score
+        FROM canonical_concepts
+        WHERE project_id = ?
+          AND canonical_embedding IS NOT NULL
+        ORDER BY score DESC
+        LIMIT ?
+        """,
+        [query_embedding, project_id, max_results],
+    ).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "name": r[1],
+            "member_concept_ids": list(r[2]) if r[2] is not None else [],
+            "role": r[3],
+            "rubric_pattern_id": r[4],
+            "score": round(r[5], 4) if r[5] else 0.0,
+        }
+        for r in rows
+    ]
+
+
+def _canonical_pair(concept_a_id: str, concept_b_id: str) -> tuple[str, str]:
+    """Return the (a, b) tuple in canonical lexicographic order.
+
+    The cache key is a single ordered pair regardless of caller direction.
+    The plan calls for `a.book_id < b.book_id`, but since concept IDs are
+    `{book_id}__{slug}` namespaced, lexicographic order on the IDs themselves
+    yields the same ordering for distinct books.
+    """
+    if concept_a_id == concept_b_id:
+        raise ValueError("Cannot align a concept with itself")
+    return (
+        (concept_a_id, concept_b_id)
+        if concept_a_id < concept_b_id
+        else (concept_b_id, concept_a_id)
+    )
+
+
+def record_alignment_decision(
+    concept_a_id: str,
+    concept_b_id: str,
+    same_concept: bool,
+    confidence: float | None = None,
+    rationale: str | None = None,
+) -> None:
+    """Record an alignment verdict for a concept pair (idempotent).
+
+    Pair is normalized to canonical order before insert, so callers may pass
+    either direction. Re-inserting overwrites the prior verdict.
+    """
+    a, b = _canonical_pair(concept_a_id, concept_b_id)
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO concept_alignment_cache
+            (concept_a_id, concept_b_id, same_concept, confidence, rationale, created_at)
+        VALUES (?, ?, ?, ?, ?, current_timestamp)
+        """,
+        [a, b, bool(same_concept), confidence, rationale],
+    )
+
+
+def get_alignment_decision(
+    concept_a_id: str,
+    concept_b_id: str,
+) -> dict | None:
+    """Return a cached alignment verdict for a concept pair, or None.
+
+    Pair is normalized to canonical order before lookup.
+    """
+    a, b = _canonical_pair(concept_a_id, concept_b_id)
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT concept_a_id, concept_b_id, same_concept, confidence,
+               rationale, created_at
+        FROM concept_alignment_cache
+        WHERE concept_a_id = ? AND concept_b_id = ?
+        """,
+        [a, b],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "concept_a_id": row[0],
+        "concept_b_id": row[1],
+        "same_concept": bool(row[2]),
+        "confidence": row[3],
+        "rationale": row[4],
+        "created_at": str(row[5]) if row[5] else None,
+    }
 
 
 # --- Query helpers ---
@@ -333,13 +960,67 @@ def get_stats() -> dict:
     }
 
 
+def search_books_by_embedding(
+    query_embedding: list[float],
+    max_results: int = 5,
+    threshold: float = 0.0,
+) -> list[dict]:
+    """Cosine similarity over books.summary_embedding (Phase 2b triage).
+
+    Skips books whose summary_embedding is NULL. Deterministic for a given
+    embedding input. Returns `score` rounded to 4 decimals to match the
+    existing concept-search style.
+    """
+    conn = get_connection()
+    dims = EMBEDDING_DIMENSIONS
+
+    rows = conn.execute(f"""
+        SELECT
+            id, title, altitude, is_oracle,
+            array_cosine_similarity(summary_embedding, ?::FLOAT[{dims}]) AS score
+        FROM books
+        WHERE summary_embedding IS NOT NULL
+        ORDER BY score DESC
+        LIMIT ?
+    """, [query_embedding, max_results]).fetchall()
+
+    out = []
+    for r in rows:
+        score = round(r[4], 4) if r[4] is not None else 0.0
+        if score < threshold:
+            continue
+        out.append({
+            "id": r[0],
+            "title": r[1],
+            "altitude": r[2],
+            "is_oracle": bool(r[3]),
+            "score": score,
+        })
+    return out
+
+
 def search_concepts_by_embedding(
     query_embedding: list[float],
     max_results: int = 10,
+    book_id: str | None = None,
 ) -> list[dict]:
-    """Search concepts by cosine similarity to a query embedding."""
+    """Search concepts by cosine similarity to a query embedding.
+
+    Args:
+        query_embedding: The query vector (1536-d).
+        max_results: Maximum results to return.
+        book_id: Optional. When provided, restrict results to concepts from
+            this book (multi-book refactor). When None, search all books.
+    """
     conn = get_connection()
     dims = EMBEDDING_DIMENSIONS
+
+    where_clause = ""
+    params: list = [query_embedding]
+    if book_id is not None:
+        where_clause = "WHERE c.book_id = ?"
+        params.append(book_id)
+    params.append(max_results)
 
     results = conn.execute(f"""
         SELECT
@@ -347,9 +1028,10 @@ def search_concepts_by_embedding(
             array_cosine_similarity(ce.embedding, ?::FLOAT[{dims}]) as score
         FROM concept_embeddings ce
         JOIN concepts c ON ce.concept_id = c.id
+        {where_clause}
         ORDER BY score DESC
         LIMIT ?
-    """, [query_embedding, max_results]).fetchall()
+    """, params).fetchall()
 
     return [
         {
@@ -366,11 +1048,25 @@ def search_concepts_by_embedding(
 def get_concept_relationships(
     concept_id: str,
     confidence_threshold: float = 0.0,
+    book_id: str | None = None,
 ) -> list[dict]:
-    """Get all relationships for a concept (both directions)."""
+    """Get all relationships for a concept (both directions).
+
+    Args:
+        concept_id: The concept whose edges to fetch.
+        confidence_threshold: Minimum edge confidence to return.
+        book_id: Optional. When provided, restrict to edges from this book
+            (multi-book refactor). When None, return edges across all books.
+    """
     conn = get_connection()
 
-    results = conn.execute("""
+    book_clause = ""
+    params: list = [concept_id, concept_id, confidence_threshold]
+    if book_id is not None:
+        book_clause = "AND r.book_id = ?"
+        params.append(book_id)
+
+    results = conn.execute(f"""
         SELECT
             r.id, r.from_concept_id, r.to_concept_id,
             r.relationship_type, r.confidence,
@@ -382,8 +1078,9 @@ def get_concept_relationships(
         JOIN concepts ct ON r.to_concept_id = ct.id
         WHERE (r.from_concept_id = ? OR r.to_concept_id = ?)
           AND r.confidence >= ?
+          {book_clause}
         ORDER BY r.confidence DESC
-    """, [concept_id, concept_id, confidence_threshold]).fetchall()
+    """, params).fetchall()
 
     return [
         {
@@ -616,18 +1313,177 @@ def get_subgraph(
     }
 
 
+def get_canonical_subgraph(
+    seed_canonical_ids: list[str],
+    project_id: str,
+    max_hops: int = 2,
+    confidence_threshold: float = 0.5,
+    max_edges: int = 50,
+    include_descriptions: bool = False,
+) -> dict:
+    """Project-scoped canonical traversal.
+
+    Phase 4b. Operates against the per-project canonical layer
+    (`canonical_concepts`) instead of raw source-book edges:
+
+      1. Resolve each seed canonical_id to its source-book member IDs.
+      2. Run the existing priority-queue BFS over `relationships` rows,
+         priority-ordered by edge confidence (highest first).
+      3. For every traversed source edge, map both endpoints back to their
+         canonical concept (skip when an endpoint isn't part of this
+         project's canonical layer, or when both endpoints land in the same
+         canonical cluster — intra-cluster edges aren't interesting).
+      4. Collapse multiple source edges that connect the same two canonical
+         concepts using **option 1: max-confidence collapse** — one canonical
+         edge per (from_canonical, to_canonical) pair, keeping the
+         highest-confidence source edge's `relationship_type` and
+         `confidence`. Source edges with different types between the same
+         clusters are reduced to a single canonical edge dictated by the
+         winner.
+
+    Output mirrors the legacy `get_subgraph` shape so the tool layer can
+    emit either with the same `nodes` / `edges` / `truncated` /
+    `total_edges_found` keys; nodes additionally carry `member_concept_ids`
+    / `role` / `rubric_pattern_id` to distinguish canonical entries.
+    """
+    import heapq
+
+    conn = get_connection()
+
+    canonical_rows = conn.execute(
+        """
+        SELECT id, name, member_concept_ids, role, rubric_pattern_id
+        FROM canonical_concepts
+        WHERE project_id = ?
+        """,
+        [project_id],
+    ).fetchall()
+
+    canonical_lookup: dict[str, dict] = {}
+    member_to_canonical: dict[str, str] = {}
+    for r in canonical_rows:
+        members = list(r[2]) if r[2] is not None else []
+        canonical_lookup[r[0]] = {
+            "id": r[0],
+            "name": r[1],
+            "member_concept_ids": members,
+            "role": r[3],
+            "rubric_pattern_id": r[4],
+        }
+        for m in members:
+            member_to_canonical[m] = r[0]
+
+    nodes: dict[str, dict] = {}
+    canonical_edges: dict[tuple[str, str], dict] = {}
+    seen_source_edges: set[int] = set()
+
+    for cid in seed_canonical_ids:
+        cluster = canonical_lookup.get(cid)
+        if cluster is None:
+            continue
+        nodes[cid] = {
+            "id": cid,
+            "name": cluster["name"],
+            "role": cluster["role"],
+            "rubric_pattern_id": cluster["rubric_pattern_id"],
+            "member_concept_ids": cluster["member_concept_ids"],
+            "depth": 0,
+            "is_seed": True,
+        }
+
+    pq: list[tuple[float, str, int]] = [(0.0, cid, 0) for cid in nodes]
+    heapq.heapify(pq)
+    explored: set[str] = set()
+
+    while pq:
+        _neg_conf, current_canonical_id, depth = heapq.heappop(pq)
+        if current_canonical_id in explored:
+            continue
+        explored.add(current_canonical_id)
+
+        if depth >= max_hops:
+            continue
+
+        cluster = canonical_lookup[current_canonical_id]
+
+        for member_id in cluster["member_concept_ids"]:
+            rels = get_concept_relationships(member_id, confidence_threshold)
+            for rel in rels:
+                if rel["id"] in seen_source_edges:
+                    continue
+                seen_source_edges.add(rel["id"])
+
+                from_id = rel["from_concept_id"]
+                to_id = rel["to_concept_id"]
+                from_can = member_to_canonical.get(from_id)
+                to_can = member_to_canonical.get(to_id)
+                if from_can is None or to_can is None:
+                    continue
+                if from_can == to_can:
+                    continue
+
+                key = (from_can, to_can)
+                rel_conf = rel["confidence"] if rel["confidence"] is not None else 0.0
+                existing = canonical_edges.get(key)
+                if existing is None or rel_conf > existing["confidence"]:
+                    edge = {
+                        "from": from_can,
+                        "to": to_can,
+                        "type": rel["relationship_type"],
+                        "confidence": rel_conf,
+                    }
+                    if include_descriptions and rel.get("description"):
+                        edge["description"] = rel["description"]
+                    canonical_edges[key] = edge
+
+                neighbour_can = to_can if from_can == current_canonical_id else from_can
+                if neighbour_can not in nodes:
+                    n_cluster = canonical_lookup[neighbour_can]
+                    nodes[neighbour_can] = {
+                        "id": neighbour_can,
+                        "name": n_cluster["name"],
+                        "role": n_cluster["role"],
+                        "rubric_pattern_id": n_cluster["rubric_pattern_id"],
+                        "member_concept_ids": n_cluster["member_concept_ids"],
+                        "depth": depth + 1,
+                        "is_seed": False,
+                    }
+                if neighbour_can not in explored:
+                    heapq.heappush(pq, (-rel_conf, neighbour_can, depth + 1))
+
+    sorted_edges = sorted(
+        canonical_edges.values(),
+        key=lambda e: -e["confidence"],
+    )
+    total_edges_found = len(sorted_edges)
+    output_edges = sorted_edges[:max_edges]
+
+    return {
+        "nodes": list(nodes.values()),
+        "edges": output_edges,
+        "truncated": total_edges_found > max_edges,
+        "total_edges_found": total_edges_found,
+    }
+
+
 def create_consultation(
     consultation_id: str,
     fingerprint: str,
     description: str,
     concept_ids: list[str],
     scores: list[float],
+    project_id: str | None = None,
 ) -> None:
-    """Create a new consultation record."""
+    """Create a new consultation record.
+
+    `project_id` (optional) ties the consultation to a Phase 3 project so the
+    Phase 4 read tools can scope to the project's canonical layer. NULL =
+    legacy single-book consultation.
+    """
     conn = get_connection()
     conn.execute(
-        "INSERT OR REPLACE INTO consultations (id, project_fingerprint, project_description, matched_concept_ids, matched_scores) VALUES (?, ?, ?, ?, ?)",
-        [consultation_id, fingerprint, description, concept_ids, scores],
+        "INSERT OR REPLACE INTO consultations (id, project_fingerprint, project_description, matched_concept_ids, matched_scores, project_id) VALUES (?, ?, ?, ?, ?, ?)",
+        [consultation_id, fingerprint, description, concept_ids, scores, project_id],
     )
 
 
@@ -694,7 +1550,7 @@ def get_consultation(consultation_id: str) -> dict | None:
     flush_consultation_steps(consultation_id)
     conn = get_connection()
     row = conn.execute(
-        "SELECT id, project_fingerprint, project_description, matched_concept_ids, matched_scores, steps, created_at FROM consultations WHERE id = ?",
+        "SELECT id, project_fingerprint, project_description, matched_concept_ids, matched_scores, steps, project_id, created_at FROM consultations WHERE id = ?",
         [consultation_id],
     ).fetchone()
     if not row:
@@ -706,7 +1562,8 @@ def get_consultation(consultation_id: str) -> dict | None:
         "matched_concept_ids": row[3],
         "matched_scores": row[4],
         "steps": _json.loads(row[5]) if row[5] else [],
-        "created_at": str(row[6]),
+        "project_id": row[6],
+        "created_at": str(row[7]),
     }
 
 
@@ -884,39 +1741,46 @@ def search_sections_by_embedding(
     query_embedding: list[float],
     max_results: int = 5,
     concept_ids: list[str] | None = None,
+    book_ids: list[str] | None = None,
 ) -> list[dict]:
     """Cosine similarity search over section embeddings.
 
-    Optionally scoped to sections linked to given concept_ids.
+    Optionally scoped to sections linked to given concept_ids and/or sections
+    belonging to given book_ids (Phase 4c: project-scoped passage retrieval).
+    Both filters are AND-ed when supplied together.
     """
     conn = get_connection()
     dims = EMBEDDING_DIMENSIONS
 
+    where_clauses: list[str] = []
+    params: list = [query_embedding]
+
+    join_clause = "FROM section_embeddings se JOIN sections s ON se.section_id = s.id"
+    select_distinct = "SELECT"
     if concept_ids:
+        join_clause += " JOIN concept_sections cs ON cs.section_id = s.id"
+        select_distinct = "SELECT DISTINCT"
         placeholders = ", ".join("?" for _ in concept_ids)
-        results = conn.execute(f"""
-            SELECT DISTINCT
-                s.id, s.title, s.chapter_number, s.part_number,
-                s.approx_page_start, s.approx_page_end, s.content,
-                array_cosine_similarity(se.embedding, ?::FLOAT[{dims}]) as score
-            FROM section_embeddings se
-            JOIN sections s ON se.section_id = s.id
-            JOIN concept_sections cs ON cs.section_id = s.id
-            WHERE cs.concept_id IN ({placeholders})
-            ORDER BY score DESC
-            LIMIT ?
-        """, [query_embedding, *concept_ids, max_results]).fetchall()
-    else:
-        results = conn.execute(f"""
-            SELECT
-                s.id, s.title, s.chapter_number, s.part_number,
-                s.approx_page_start, s.approx_page_end, s.content,
-                array_cosine_similarity(se.embedding, ?::FLOAT[{dims}]) as score
-            FROM section_embeddings se
-            JOIN sections s ON se.section_id = s.id
-            ORDER BY score DESC
-            LIMIT ?
-        """, [query_embedding, max_results]).fetchall()
+        where_clauses.append(f"cs.concept_id IN ({placeholders})")
+        params.extend(concept_ids)
+    if book_ids:
+        placeholders = ", ".join("?" for _ in book_ids)
+        where_clauses.append(f"s.book_id IN ({placeholders})")
+        params.extend(book_ids)
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    params.append(max_results)
+
+    results = conn.execute(f"""
+        {select_distinct}
+            s.id, s.title, s.chapter_number, s.part_number,
+            s.approx_page_start, s.approx_page_end, s.content, s.book_id,
+            array_cosine_similarity(se.embedding, ?::FLOAT[{dims}]) as score
+        {join_clause}
+        {where_sql}
+        ORDER BY score DESC
+        LIMIT ?
+    """, params).fetchall()
 
     return [
         {
@@ -927,7 +1791,8 @@ def search_sections_by_embedding(
             "approx_page_start": r[4],
             "approx_page_end": r[5],
             "content": r[6],
-            "score": round(r[7], 4) if r[7] else 0.0,
+            "book_id": r[7],
+            "score": round(r[8], 4) if r[8] else 0.0,
         }
         for r in results
     ]

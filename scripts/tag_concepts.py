@@ -7,6 +7,7 @@ scores and one-sentence summaries. Results go into concept_sections table
 and concepts.definition gets updated.
 """
 
+import argparse
 import json
 import re
 import sys
@@ -14,23 +15,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from iconsult_mcp.config import LITERATURE_DIR, BOOK_FILENAME
+from iconsult_mcp.config import get_book_paths, list_registered_books
 from iconsult_mcp.db import get_connection
 from iconsult_mcp.embed import claude_messages
+
+DEFAULT_BOOK_ID = "arsanjani_2026"
 
 # Maximum characters of section text to send per Claude call
 MAX_CONTEXT_CHARS = 80_000
 
 
-def get_chapter_sections(chapter_number: int) -> list[dict]:
-    """Get all sections for a chapter from the database."""
+def get_chapter_sections(chapter_number: int, book_id: str) -> list[dict]:
+    """Get all sections for a chapter, scoped to one book."""
     conn = get_connection()
     rows = conn.execute("""
         SELECT id, title, line_start, line_end
         FROM sections
-        WHERE chapter_number = ?
+        WHERE chapter_number = ? AND book_id = ?
         ORDER BY line_start
-    """, [chapter_number]).fetchall()
+    """, [chapter_number, book_id]).fetchall()
 
     return [
         {"id": r[0], "title": r[1], "line_start": r[2], "line_end": r[3]}
@@ -38,11 +41,12 @@ def get_chapter_sections(chapter_number: int) -> list[dict]:
     ]
 
 
-def get_all_concepts() -> list[dict]:
-    """Get all concepts from the database."""
+def get_all_concepts(book_id: str) -> list[dict]:
+    """Get all concepts for one book."""
     conn = get_connection()
     rows = conn.execute(
-        "SELECT id, name, page_references FROM concepts ORDER BY name"
+        "SELECT id, name, page_references FROM concepts WHERE book_id = ? ORDER BY name",
+        [book_id],
     ).fetchall()
     return [{"id": r[0], "name": r[1], "pages": r[2]} for r in rows]
 
@@ -63,12 +67,13 @@ async def tag_chapter(
     chapter_number: int,
     book_lines: list[str],
     concepts: list[dict],
+    book_id: str,
 ) -> list[dict]:
     """Use Claude to tag which concepts appear in each section of a chapter.
 
     Returns list of dicts: {concept_id, section_id, confidence, is_primary, definition}
     """
-    sections = get_chapter_sections(chapter_number)
+    sections = get_chapter_sections(chapter_number, book_id)
     if not sections:
         print(f"  No sections found for chapter {chapter_number}")
         return []
@@ -148,28 +153,36 @@ Return ONLY the JSON array, no other text."""
         return []
 
 
-async def run_phase2():
-    """Run Phase 2: tag all concepts to sections."""
+async def run_phase2(book_id: str):
+    """Run Phase 2 for one book: tag concepts to sections."""
     conn = get_connection()
 
-    # Idempotency check
+    metadata_key = f"phase2_complete:{book_id}"
     existing = conn.execute(
-        "SELECT value FROM pipeline_metadata WHERE key = 'phase2_complete'"
+        "SELECT value FROM pipeline_metadata WHERE key = ?",
+        [metadata_key],
     ).fetchone()
     if existing and existing[0] == "true":
-        print("Phase 2 already complete. Skipping. (Delete pipeline_metadata key 'phase2_complete' to re-run)")
+        print(
+            f"Phase 2 already complete for {book_id}. Skipping. "
+            f"(Delete pipeline_metadata key '{metadata_key}' to re-run)"
+        )
         return
 
-    # Load book text
-    book_path = LITERATURE_DIR / BOOK_FILENAME
+    paths = get_book_paths(book_id)
+    book_path = paths["book"]
+    if not book_path.exists():
+        print(f"ERROR: Book file not found for '{book_id}': {book_path}")
+        sys.exit(1)
     book_lines = book_path.read_text(encoding="utf-8").splitlines()
 
-    concepts = get_all_concepts()
-    print(f"Loaded {len(concepts)} concepts")
+    concepts = get_all_concepts(book_id)
+    print(f"Loaded {len(concepts)} concepts for {book_id}")
 
-    # Get chapter numbers that have sections
+    # Get chapter numbers that have sections for this book
     chapters = conn.execute(
-        "SELECT DISTINCT chapter_number FROM sections ORDER BY chapter_number"
+        "SELECT DISTINCT chapter_number FROM sections WHERE book_id = ? ORDER BY chapter_number",
+        [book_id],
     ).fetchall()
     chapter_numbers = [r[0] for r in chapters]
     print(f"Processing {len(chapter_numbers)} chapters")
@@ -179,7 +192,7 @@ async def run_phase2():
 
     for ch_num in chapter_numbers:
         print(f"\n  Tagging Chapter {ch_num}...")
-        tags = await tag_chapter(ch_num, book_lines, concepts)
+        tags = await tag_chapter(ch_num, book_lines, concepts, book_id)
         print(f"    Found {len(tags)} concept-section mappings")
         all_tags.extend(tags)
 
@@ -191,8 +204,11 @@ async def run_phase2():
                 if cid not in definitions or tag.get("is_primary"):
                     definitions[cid] = defn
 
-    # Insert concept_sections
-    conn.execute("DELETE FROM concept_sections")
+    # Insert concept_sections (scoped delete uses join through concepts.book_id)
+    conn.execute("""
+        DELETE FROM concept_sections
+        WHERE concept_id IN (SELECT id FROM concepts WHERE book_id = ?)
+    """, [book_id])
     inserted = 0
     for tag in all_tags:
         try:
@@ -206,19 +222,19 @@ async def run_phase2():
                 tag.get("is_primary", False),
             ])
             inserted += 1
-        except Exception as e:
+        except Exception:
             # Skip invalid foreign keys etc.
             pass
 
     print(f"\nInserted {inserted} concept-section mappings")
 
-    # Update concept definitions
+    # Update concept definitions (scoped to this book)
     updated = 0
     for cid, defn in definitions.items():
         try:
             conn.execute(
-                "UPDATE concepts SET definition = ? WHERE id = ?",
-                [defn, cid],
+                "UPDATE concepts SET definition = ? WHERE id = ? AND book_id = ?",
+                [defn, cid, book_id],
             )
             updated += 1
         except Exception:
@@ -226,15 +242,23 @@ async def run_phase2():
 
     print(f"Updated {updated} concept definitions")
 
-    conn.execute("""
-        INSERT OR REPLACE INTO pipeline_metadata (key, value)
-        VALUES ('phase2_complete', 'true')
-    """)
+    conn.execute(
+        "INSERT OR REPLACE INTO pipeline_metadata (key, value) VALUES (?, 'true')",
+        [metadata_key],
+    )
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Tag concepts to sections via Claude.")
+    parser.add_argument(
+        "--book",
+        default=DEFAULT_BOOK_ID,
+        help=f"Book ID from config.BOOKS (default: {DEFAULT_BOOK_ID}).",
+    )
+    args = parser.parse_args()
+
     import asyncio
-    asyncio.run(run_phase2())
+    asyncio.run(run_phase2(args.book))
 
 
 if __name__ == "__main__":

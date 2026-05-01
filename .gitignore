@@ -13,7 +13,12 @@ env/
 *.log
 .pytest_cache/
 .mypy_cache/
-literature/
+# Source book material is gitignored (licensing — Mathpix-extracted from copyrighted books).
+# Exception: curated summary files (user-authored prose, basis for triage embeddings) are kept in git.
+literature/**
+!literature/
+!literature/*/
+!literature/*/summary.md
 data/
 .claude/
 demo/

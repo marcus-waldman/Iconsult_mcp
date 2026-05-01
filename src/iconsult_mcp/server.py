@@ -15,6 +15,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import GetPromptResult, Prompt, PromptArgument, PromptMessage, TextContent, Tool
 
+from iconsult_mcp.arg_coerce import coerce_typed_args
 from iconsult_mcp.config import TOOL_MAX_RETRIES, TOOL_RETRY_BASE_DELAY, TOOL_TIMEOUT_SECONDS
 
 # Exceptions eligible for retry (network/timeout only, not logic errors)
@@ -25,6 +26,8 @@ from iconsult_mcp.tools.list_concepts import list_concepts
 from iconsult_mcp.tools.get_subgraph import get_subgraph
 from iconsult_mcp.tools.ask_book import ask_book
 from iconsult_mcp.tools.match_concepts import match_concepts
+from iconsult_mcp.tools.triage import triage_books
+from iconsult_mcp.tools.projects import build_project_kg, list_books, start_project
 from iconsult_mcp.tools.consultation_report import consultation_report
 from iconsult_mcp.tools.log_pattern_assessment import log_pattern_assessment
 from iconsult_mcp.tools.score_architecture import score_architecture
@@ -51,6 +54,10 @@ logger = logging.getLogger(__name__)
 TOOL_METADATA = {
     "health_check": {"timeout": 10, "retryable": False, "category": "diagnostic", "access_level": "admin"},
     "match_concepts": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "write"},
+    "triage_books": {"timeout": 30, "retryable": True, "category": "browse", "access_level": "read"},
+    "list_books": {"timeout": 10, "retryable": True, "category": "browse", "access_level": "read"},
+    "start_project": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "write"},
+    "build_project_kg": {"timeout": 600, "retryable": False, "category": "consultation", "access_level": "write"},
     "list_concepts": {"timeout": 15, "retryable": True, "category": "browse", "access_level": "read"},
     "get_subgraph": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
     "ask_book": {"timeout": 30, "retryable": True, "category": "consultation", "access_level": "read"},
@@ -83,6 +90,30 @@ TOOL_DISPATCH = {
         project_description=args.get("project_description", ""),
         max_results=args.get("max_results", 15),
         similarity_threshold=args.get("similarity_threshold", 0.3),
+        project_id=args.get("project_id"),
+    ),
+    "triage_books": lambda args: triage_books(
+        project_description=args.get("project_description", ""),
+        top_k=args.get("top_k", 5),
+        threshold=args.get("threshold", 0.4),
+    ),
+    "list_books": lambda args: list_books(
+        altitude=args.get("altitude"),
+    ),
+    "start_project": lambda args: start_project(
+        name=args.get("name", ""),
+        project_description=args.get("project_description", ""),
+        triaged_book_ids=args.get("triaged_book_ids"),
+        project_id=args.get("project_id"),
+        triage_top_k=args.get("triage_top_k", 5),
+        triage_threshold=args.get("triage_threshold", 0.4),
+    ),
+    "build_project_kg": lambda args: build_project_kg(
+        project_id=args.get("project_id", ""),
+        force=args.get("force", False),
+        auto_align=args.get("auto_align", True),
+        align_threshold=args.get("align_threshold", 0.6),
+        align_top_k=args.get("align_top_k", 5),
     ),
     "list_concepts": lambda args: list_concepts(
         search=args.get("search"),
@@ -95,12 +126,14 @@ TOOL_DISPATCH = {
         max_edges=args.get("max_edges", 50),
         include_descriptions=args.get("include_descriptions", False),
         consultation_id=args.get("consultation_id"),
+        project_id=args.get("project_id"),
     ),
     "ask_book": lambda args: ask_book(
         question=args.get("question", ""),
         concept_ids=args.get("concept_ids"),
         max_passages=args.get("max_passages", 3),
         consultation_id=args.get("consultation_id"),
+        project_id=args.get("project_id"),
     ),
     "consultation_report": lambda args: consultation_report(
         consultation_id=args.get("consultation_id", ""),
@@ -119,6 +152,10 @@ TOOL_DISPATCH = {
         evidence=args.get("evidence", ""),
         maturity_level=args.get("maturity_level", 1),
         failure_context=args.get("failure_context"),
+        category=args.get("category", ""),
+        indicators=args.get("indicators"),
+        source_book_id=args.get("source_book_id"),
+        canonical_concept_id=args.get("canonical_concept_id"),
     ),
     "validate_subagent": lambda args: validate_subagent(
         response=args.get("response", {}),
@@ -420,7 +457,12 @@ async def list_tools() -> list[Tool]:
                 "graph concepts via embedding similarity. Returns ranked concepts with scores "
                 "and creates a consultation_id that tracks the session. The same description "
                 "always produces the same concept ranking and fingerprint. Pass the returned "
-                "consultation_id to get_subgraph and ask_book for step logging."
+                "consultation_id to get_subgraph and ask_book for step logging. When "
+                "project_id is provided AND the project's unified KG has been built "
+                "(build_project_kg), the search runs against the per-project canonical "
+                "concept layer (deduplicated across triaged books) and returned concepts "
+                "carry member_concept_ids, role, and rubric_pattern_id. When project_id "
+                "is omitted, behaviour is identical to the legacy single-book path."
             ),
             inputSchema={
                 "type": "object",
@@ -437,8 +479,155 @@ async def list_tools() -> list[Tool]:
                         "type": "number",
                         "description": "Minimum cosine similarity to include (0.0-1.0, default: 0.3)",
                     },
+                    "project_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Project ID from start_project. When provided and "
+                            "the project's unified KG is built, search runs against the "
+                            "project's canonical concept layer instead of the global "
+                            "concept space."
+                        ),
+                    },
                 },
                 "required": ["project_description"],
+            },
+        ),
+        Tool(
+            name="triage_books",
+            description=(
+                "TRIAGE — Rank registered books by cosine similarity to a project "
+                "description. Embeds the description and matches against each "
+                "book's summary_embedding. Returns ranked list with scores. Pure "
+                "read tool, deterministic, no consultation_id created. With one "
+                "book registered the ranking is degenerate; the value emerges as "
+                "the corpus grows."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_description": {
+                        "type": "string",
+                        "description": "Free-text description of the user's project, architecture, and goals",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Maximum books to return (1-50, default: 5)",
+                    },
+                    "threshold": {
+                        "type": "number",
+                        "description": "Minimum cosine score to include (0.0-1.0, default: 0.4)",
+                    },
+                },
+                "required": ["project_description"],
+            },
+        ),
+        Tool(
+            name="list_books",
+            description=(
+                "BROWSE — List registered books in the corpus catalogue. "
+                "Optional altitude filter ('mid_level', 'implementation', "
+                "'strategy', 'domain'). Pure read tool, deterministic, no "
+                "consultation_id created. Use this to inspect what books are "
+                "available before triage; complements `triage_books` (which "
+                "ranks them) and `list_concepts` (which lists concepts within)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "altitude": {
+                        "type": "string",
+                        "description": "Optional altitude filter (e.g. 'mid_level')",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="start_project",
+            description=(
+                "START PROJECT — Create or refresh a per-project cache row. "
+                "If `triaged_book_ids` is omitted, runs `triage_books` "
+                "internally with the same description and stores the ranked "
+                "IDs above threshold. Project ID is derived deterministically "
+                "from (name, project_description) so calling twice with the "
+                "same args is idempotent. Does NOT build the unified KG — "
+                "that is `build_project_kg` (Phase 3c, pending). Returns "
+                "project_id, the full project row, and (when run) the triage "
+                "details. Subsequent consultations on the same project skip "
+                "triage and reuse the cached `triaged_book_ids`."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Human-readable project name",
+                    },
+                    "project_description": {
+                        "type": "string",
+                        "description": "Free-text project description (also used as triage signal)",
+                    },
+                    "triaged_book_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Explicit book IDs to scope to (skips internal triage)",
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional user-supplied project ID (default: hash of name + description)",
+                    },
+                    "triage_top_k": {
+                        "type": "integer",
+                        "description": "Top-k for internal triage when triaged_book_ids omitted (default 5)",
+                    },
+                    "triage_threshold": {
+                        "type": "number",
+                        "description": "Cosine threshold for internal triage (default 0.4)",
+                    },
+                },
+                "required": ["name", "project_description"],
+            },
+        ),
+        Tool(
+            name="build_project_kg",
+            description=(
+                "BUILD PROJECT KG — Build the per-project canonical layer for "
+                "an existing project. Aligns each pair of triaged books "
+                "(cosine-shortlist + Claude adjudication, cached in "
+                "concept_alignment_cache so re-runs are fast), runs union-find "
+                "over positive verdicts to cluster cross-book equivalents, "
+                "writes one canonical_concepts row per cluster (singletons "
+                "included) with role classification (supporting_evidence vs "
+                "informational_only based on rubric pattern alias hits), and "
+                "marks the project as built. Idempotent: skips when "
+                "unified_kg_built_at is already set unless `force=True`. "
+                "Returns stats and a preview sample of multi-member clusters."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_id": {
+                        "type": "string",
+                        "description": "The project to build the canonical KG for",
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Rebuild even if the KG was previously built (default false)",
+                    },
+                    "auto_align": {
+                        "type": "boolean",
+                        "description": "Run alignment for any un-cached book pairs first (default true)",
+                    },
+                    "align_threshold": {
+                        "type": "number",
+                        "description": "Cosine cut for alignment shortlisting (default 0.6)",
+                    },
+                    "align_top_k": {
+                        "type": "integer",
+                        "description": "Per-side top-k for bidirectional shortlisting (default 5)",
+                    },
+                },
+                "required": ["project_id"],
             },
         ),
         Tool(
@@ -472,7 +661,13 @@ async def list_tools() -> list[Tool]:
                 "max_hops and returns all reachable nodes and edges. Use relationship types to "
                 "discover opportunities: alternative_to for competing approaches, "
                 "requires for prerequisites, conflicts_with for incompatibilities, complements "
-                "for synergies. Pass consultation_id to log traversal steps for coverage tracking."
+                "for synergies. Pass consultation_id to log traversal steps for coverage tracking. "
+                "When the consultation was opened with a project_id (or project_id is passed "
+                "explicitly here) AND the project's unified KG has been built, traversal runs over "
+                "the canonical edge view: each canonical seed expands to its source-book members, "
+                "BFS runs across raw relationships, and results collapse back to canonical "
+                "clusters with one edge per (from_canonical, to_canonical) pair (highest-confidence "
+                "source edge wins). Nodes carry member_concept_ids / role / rubric_pattern_id."
             ),
             inputSchema={
                 "type": "object",
@@ -480,7 +675,7 @@ async def list_tools() -> list[Tool]:
                     "concept_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "List of concept IDs to start traversal from",
+                        "description": "List of concept IDs to start traversal from. When project-scoped, these are canonical concept IDs from match_concepts.",
                     },
                     "max_hops": {
                         "type": "integer",
@@ -500,7 +695,11 @@ async def list_tools() -> list[Tool]:
                     },
                     "consultation_id": {
                         "type": "string",
-                        "description": "Optional consultation ID from match_concepts to log this step",
+                        "description": "Optional consultation ID from match_concepts to log this step. If the consultation is project-scoped, project_id is auto-picked up from the row.",
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional. Project ID from start_project. When provided and the project's unified KG is built, traversal runs over the canonical edge view instead of the raw concept graph. Usually unnecessary — picked up automatically from the consultation row.",
                     },
                 },
                 "required": ["concept_ids"],
@@ -513,7 +712,11 @@ async def list_tools() -> list[Tool]:
                 "question and returns the most relevant book passages with full text, chapter, "
                 "page numbers, and section title. ALWAYS scope with concept_ids from "
                 "get_subgraph for precision. Returns suggested_questions derived deterministically "
-                "from graph edges. Pass consultation_id to log retrieval steps."
+                "from graph edges. Pass consultation_id to log retrieval steps. When the "
+                "consultation was opened with a project_id (or project_id is passed explicitly here) "
+                "AND the project's unified KG has been built, passage search is scoped to the "
+                "project's triaged_book_ids and any caller-supplied canonical concept_ids are "
+                "expanded to their source-book members; passages carry book_id provenance."
             ),
             inputSchema={
                 "type": "object",
@@ -525,7 +728,7 @@ async def list_tools() -> list[Tool]:
                     "concept_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional: scope search to sections linked to these concept IDs",
+                        "description": "Optional: scope search to sections linked to these concept IDs. When project-scoped, these are canonical concept IDs that get expanded to source-book members.",
                     },
                     "max_passages": {
                         "type": "integer",
@@ -533,7 +736,11 @@ async def list_tools() -> list[Tool]:
                     },
                     "consultation_id": {
                         "type": "string",
-                        "description": "Optional consultation ID from match_concepts to log this step",
+                        "description": "Optional consultation ID from match_concepts to log this step. If the consultation is project-scoped, project_id is auto-picked up from the row.",
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "Optional. Project ID from start_project. When provided and the project's unified KG is built, passage search is scoped to the project's triaged_book_ids and canonical concept_ids are expanded to members. Usually unnecessary — picked up automatically from the consultation row.",
                     },
                 },
                 "required": ["question"],
@@ -645,6 +852,45 @@ async def list_tools() -> list[Tool]:
                             "Fields: code_refs (list of {file, line, snippet}), "
                             "failure_mode (string describing what breaks), "
                             "depends_on (list of pattern_ids this depends on)"
+                        ),
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Rubric category key (e.g., 'coordination', "
+                            "'robustness'). Auto-resolved from pattern_id via the "
+                            "Ch. 12 rubric if omitted."
+                        ),
+                    },
+                    "indicators": {
+                        "type": "array",
+                        "description": (
+                            "Optional. Binary indicator assessments from the Ch. 12 "
+                            "rubric for this pattern. Each entry: "
+                            "{text: string, met: bool, na: bool (optional)}. When "
+                            "supplied (and status is not 'not_applicable'), status "
+                            "is auto-computed: all met -> 'implemented', else -> "
+                            "'missing'. Surfaced into score_architecture's "
+                            "missing_indicators per-pattern gap analysis."
+                        ),
+                        "items": {"type": "object"},
+                    },
+                    "source_book_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Which book this pattern's evidence came from "
+                            "(e.g., 'gulli_2025'). Pure provenance — no validation, "
+                            "no behaviour change to score_architecture. Surfaced "
+                            "downstream into failure_scenarios and render_report "
+                            "for attribution in multi-book consultations."
+                        ),
+                    },
+                    "canonical_concept_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional. The canonical cluster ID "
+                            "({project_id}__{slug}) the assessed concept belongs to "
+                            "in a project-scoped consultation. Pure provenance."
                         ),
                     },
                 },
@@ -1135,12 +1381,35 @@ async def list_tools() -> list[Tool]:
     ]
 
 
+# Cached map of tool name -> inputSchema, populated lazily on first
+# call_tool invocation. Used by the defensive arg-coercion path to
+# JSON-decode string-encoded array / integer / number / boolean values
+# that some MCP harnesses (notably Claude Code) ship as strings.
+_TOOL_SCHEMAS: dict[str, dict] | None = None
+
+
+async def _get_tool_schemas() -> dict[str, dict]:
+    """Lazy schema cache built from list_tools()."""
+    global _TOOL_SCHEMAS
+    if _TOOL_SCHEMAS is None:
+        tools = await list_tools()
+        _TOOL_SCHEMAS = {t.name: t.inputSchema for t in tools}
+    return _TOOL_SCHEMAS
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     """Handle tool calls via dispatch table with timeout protection."""
     handler = TOOL_DISPATCH.get(name)
     if handler is None:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+    # Defensive coercion: some MCP harnesses JSON-encode array/integer/
+    # number/boolean params as strings before they reach the server.
+    # Decode them based on the tool's declared schema so individual tools
+    # don't have to defend against the harness quirk.
+    schemas = await _get_tool_schemas()
+    arguments = coerce_typed_args(arguments, schemas.get(name))
 
     meta = TOOL_METADATA.get(name, {})
     timeout = meta.get("timeout", TOOL_TIMEOUT_SECONDS)

@@ -46,6 +46,44 @@ def test_old_id_resolves_to_rubric_id():
     assert normalize_pattern_id("majority_voting_pattern") == "majority_voting"
 
 
+def test_fcot_pattern_anchors_to_fractal_cot_embedding():
+    """Arsanjani's `fcot_pattern` concept ID resolves to the rubric pattern.
+
+    Without this alias the multi-book canonical layer (Phase 3c) sees
+    arsanjani's FCoT cluster fall into informational_only even though
+    Self-Correction and Structured Reasoning (sibling FCoT siblings) DO
+    anchor correctly. Companion to `structured_reasoning_and_self` and
+    `self_correction_pattern` aliases.
+    """
+    assert normalize_pattern_id("fcot_pattern") == "fractal_cot_embedding"
+    assert normalize_pattern_id("arsanjani_2026__fcot_pattern") == "fractal_cot_embedding"
+
+
+def test_phase3c_alias_gaps_resolved():
+    """Companion fixes to FCoT — arsanjani concept slugs that came in as
+    bare-slug variants of already-aliased patterns or as close-but-not-
+    identical name matches to existing rubric patterns. Surfaced during
+    Phase 3c canonical-layer review when these clusters fell into
+    informational_only despite obvious rubric relevance.
+    """
+    # Bare-slug variant; sibling `auto_healing_pattern` was already aliased.
+    assert normalize_pattern_id("auto_healing") == "auto_healing_agent_resuscitation"
+    assert normalize_pattern_id("arsanjani_2026__auto_healing") == "auto_healing_agent_resuscitation"
+
+    # Audit Trail → basic audit logging. The other audit-themed rubric ID,
+    # `instruction_fidelity_auditing`, is a different pattern (request/output
+    # auditing, not log retention).
+    assert normalize_pattern_id("audit_trail_pattern") == "basic_audit_logging"
+    assert normalize_pattern_id("arsanjani_2026__audit_trail_pattern") == "basic_audit_logging"
+
+    # Arsanjani's verbose name maps to the rubric's terser variant.
+    assert normalize_pattern_id("agent_specific_context_and_memory") == "agent_specific_memory"
+    assert (
+        normalize_pattern_id("arsanjani_2026__agent_specific_context_and_memory")
+        == "agent_specific_memory"
+    )
+
+
 def test_rubric_id_unchanged():
     """Rubric IDs are returned unchanged by normalize_pattern_id."""
     assert normalize_pattern_id("watchdog_timeout") == "watchdog_timeout"

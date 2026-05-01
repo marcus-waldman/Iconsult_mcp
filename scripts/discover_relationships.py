@@ -18,6 +18,7 @@ Phase 3e — Summary-Based Cross-Chapter: Claude analyzes chapter summaries to f
 structural cross-chapter relationships. source_type="cross_chapter_summary".
 """
 
+import argparse
 import json
 import re
 import sys
@@ -25,9 +26,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from iconsult_mcp.config import LITERATURE_DIR, BOOK_FILENAME
+from iconsult_mcp.config import get_book_paths, list_registered_books
 from iconsult_mcp.db import get_connection
 from iconsult_mcp.embed import claude_messages, embed_texts
+
+DEFAULT_BOOK_ID = "arsanjani_2026"
 
 RELATIONSHIP_TYPES = [
     "uses", "extends", "alternative_to", "component_of",
@@ -55,35 +58,35 @@ def _parse_claude_json(response: str, label: str = "") -> list[dict]:
         return []
 
 
-def is_done(label: str) -> bool:
-    """Check if a sub-phase is already complete."""
+def is_done(label: str, book_id: str) -> bool:
+    """Check if a sub-phase is already complete for one book."""
     conn = get_connection()
     result = conn.execute(
         "SELECT value FROM pipeline_metadata WHERE key = ?",
-        [f"phase3_{label}"],
+        [f"phase3_{label}:{book_id}"],
     ).fetchone()
     return result is not None and result[0] == "true"
 
 
-def mark_done(label: str):
-    """Mark a sub-phase as complete."""
+def mark_done(label: str, book_id: str):
+    """Mark a sub-phase as complete for one book."""
     conn = get_connection()
     conn.execute(
         "INSERT OR REPLACE INTO pipeline_metadata (key, value) VALUES (?, 'true')",
-        [f"phase3_{label}"],
+        [f"phase3_{label}:{book_id}"],
     )
 
 
 # --- Core helpers ---
 
-def get_chapter_sections_with_text(chapter_number: int, book_lines: list[str]) -> list[dict]:
-    """Get sections for a chapter with their text content."""
+def get_chapter_sections_with_text(chapter_number: int, book_lines: list[str], book_id: str) -> list[dict]:
+    """Get sections for a chapter with their text content (book-scoped)."""
     conn = get_connection()
     rows = conn.execute("""
         SELECT id, title, line_start, line_end
-        FROM sections WHERE chapter_number = ?
+        FROM sections WHERE chapter_number = ? AND book_id = ?
         ORDER BY line_start
-    """, [chapter_number]).fetchall()
+    """, [chapter_number, book_id]).fetchall()
 
     sections = []
     for r in rows:
@@ -96,17 +99,17 @@ def get_chapter_sections_with_text(chapter_number: int, book_lines: list[str]) -
     return sections
 
 
-def get_concepts_in_chapter(chapter_number: int) -> list[dict]:
-    """Get concepts that appear in a chapter's sections."""
+def get_concepts_in_chapter(chapter_number: int, book_id: str) -> list[dict]:
+    """Get concepts that appear in a chapter's sections (book-scoped)."""
     conn = get_connection()
     rows = conn.execute("""
         SELECT DISTINCT c.id, c.name
         FROM concepts c
         JOIN concept_sections cs ON c.id = cs.concept_id
         JOIN sections s ON cs.section_id = s.id
-        WHERE s.chapter_number = ?
+        WHERE s.chapter_number = ? AND c.book_id = ? AND s.book_id = ?
         ORDER BY c.name
-    """, [chapter_number]).fetchall()
+    """, [chapter_number, book_id, book_id]).fetchall()
     return [{"id": r[0], "name": r[1]} for r in rows]
 
 
@@ -120,13 +123,18 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def insert_relationships(relationships: list[dict]) -> int:
-    """Insert discovered relationships into the database.
+def insert_relationships(relationships: list[dict], book_id: str) -> int:
+    """Insert discovered relationships (book-scoped) into the database.
 
-    Validates concept IDs against DB, checks for duplicates, and logs failures.
+    Validates concept IDs against DB (scoped to this book), checks for
+    duplicates, and logs failures.
     """
     conn = get_connection()
-    valid_concepts = {r[0] for r in conn.execute("SELECT id FROM concepts").fetchall()}
+    valid_concepts = {
+        r[0] for r in conn.execute(
+            "SELECT id FROM concepts WHERE book_id = ?", [book_id]
+        ).fetchall()
+    }
 
     inserted = 0
     skipped_concept = 0
@@ -149,10 +157,12 @@ def insert_relationships(relationships: list[dict]) -> int:
             skipped_concept += 1
             continue
 
-        # Check for existing duplicate
+        # Check for existing duplicate (book-scoped)
         existing = conn.execute(
-            "SELECT id FROM relationships WHERE from_concept_id = ? AND to_concept_id = ? AND relationship_type = ?",
-            [fid, tid, rel_type],
+            """SELECT id FROM relationships
+               WHERE from_concept_id = ? AND to_concept_id = ?
+                 AND relationship_type = ? AND book_id = ?""",
+            [fid, tid, rel_type, book_id],
         ).fetchone()
         if existing:
             duplicates += 1
@@ -167,8 +177,8 @@ def insert_relationships(relationships: list[dict]) -> int:
             conn.execute("""
                 INSERT INTO relationships
                 (from_concept_id, to_concept_id, relationship_type, confidence,
-                 source_type, provenance_sections, provenance_pages, description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 source_type, provenance_sections, provenance_pages, description, book_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 fid, tid, rel_type,
                 r.get("confidence", 0.5),
@@ -176,6 +186,7 @@ def insert_relationships(relationships: list[dict]) -> int:
                 provenance_sections,
                 r.get("provenance_pages", []),
                 r.get("description", ""),
+                book_id,
             ])
             inserted += 1
         except Exception as e:
@@ -196,10 +207,10 @@ def insert_relationships(relationships: list[dict]) -> int:
 
 # --- Phase 3a: Explicit relationships ---
 
-async def discover_explicit_relationships(chapter_number: int, book_lines: list[str]) -> list[dict]:
+async def discover_explicit_relationships(chapter_number: int, book_lines: list[str], book_id: str) -> list[dict]:
     """Phase 3a: Use Claude to find explicitly stated relationships in a chapter."""
-    sections = get_chapter_sections_with_text(chapter_number, book_lines)
-    concepts = get_concepts_in_chapter(chapter_number)
+    sections = get_chapter_sections_with_text(chapter_number, book_lines, book_id)
+    concepts = get_concepts_in_chapter(chapter_number, book_id)
 
     if not sections or not concepts:
         return []
@@ -583,38 +594,36 @@ Return ONLY a JSON array. Be selective — skip pairs with only superficial simi
 
 # --- Phase 3e: Summary-Based Cross-Chapter ---
 
-async def discover_cross_chapter_summary() -> list[dict]:
+async def discover_cross_chapter_summary(book_id: str) -> list[dict]:
     """Phase 3e: Claude analyzes chapter summaries to find structural cross-chapter relationships.
 
     Collects key concepts, definitions, and existing internal relationships for each chapter,
-    then asks Claude to identify structural connections between chapters.
+    then asks Claude to identify structural connections between chapters. Book-scoped.
     """
     conn = get_connection()
 
-    # Get all chapters
     chapters = conn.execute(
-        "SELECT DISTINCT chapter_number FROM sections ORDER BY chapter_number"
+        "SELECT DISTINCT chapter_number FROM sections WHERE book_id = ? ORDER BY chapter_number",
+        [book_id],
     ).fetchall()
 
-    # Build chapter summaries
     chapter_summaries = []
     for (ch_num,) in chapters:
-        # Get concepts in this chapter
         concepts = conn.execute("""
             SELECT DISTINCT c.id, c.name, c.definition
             FROM concepts c
             JOIN concept_sections cs ON c.id = cs.concept_id
             JOIN sections s ON cs.section_id = s.id
-            WHERE s.chapter_number = ?
+            WHERE s.chapter_number = ? AND c.book_id = ? AND s.book_id = ?
             ORDER BY c.name
-        """, [ch_num]).fetchall()
+        """, [ch_num, book_id, book_id]).fetchall()
 
         if not concepts:
             continue
 
         concept_ids = [c[0] for c in concepts]
 
-        # Get internal relationships for this chapter
+        # Get internal relationships for this chapter (book-scoped)
         placeholders = ", ".join(["?"] * len(concept_ids))
         rels = conn.execute(f"""
             SELECT r.from_concept_id, r.to_concept_id, r.relationship_type, r.description
@@ -622,9 +631,10 @@ async def discover_cross_chapter_summary() -> list[dict]:
             WHERE r.from_concept_id IN ({placeholders})
               AND r.to_concept_id IN ({placeholders})
               AND r.source_type = 'explicit'
+              AND r.book_id = ?
             ORDER BY r.confidence DESC
             LIMIT 20
-        """, concept_ids + concept_ids).fetchall()
+        """, concept_ids + concept_ids + [book_id]).fetchall()
 
         concept_lines = []
         for c in concepts:
@@ -694,7 +704,7 @@ Return ONLY a JSON array. Focus on architecturally significant relationships:
 
 # --- Main orchestrator ---
 
-async def run_phase3(sub_phases: list[str] | None = None):
+async def run_phase3(book_id: str, sub_phases: list[str] | None = None):
     """Run Phase 3: discover all relationships.
 
     Args:
@@ -713,7 +723,7 @@ async def run_phase3(sub_phases: list[str] | None = None):
     def load_book():
         nonlocal book_lines
         if book_lines is None:
-            book_path = LITERATURE_DIR / BOOK_FILENAME
+            book_path = get_book_paths(book_id)["book"]
             book_lines = book_path.read_text(encoding="utf-8").splitlines()
         return book_lines
 
@@ -721,109 +731,129 @@ async def run_phase3(sub_phases: list[str] | None = None):
         nonlocal concepts
         if concepts is None:
             rows = conn.execute(
-                "SELECT id, name, definition, category FROM concepts ORDER BY name"
+                "SELECT id, name, definition, category FROM concepts WHERE book_id = ? ORDER BY name",
+                [book_id],
             ).fetchall()
             concepts = [{"id": r[0], "name": r[1], "definition": r[2], "category": r[3]} for r in rows]
         return concepts
 
     # Phase 3a: Explicit relationships
     if "3a" in to_run:
-        if is_done("3a_complete"):
-            print("Phase 3a already complete. Skipping.")
+        if is_done("3a_complete", book_id):
+            print(f"Phase 3a already complete for {book_id}. Skipping.")
         else:
-            print("=== Phase 3a: Discovering explicit relationships ===")
+            print(f"=== Phase 3a: Discovering explicit relationships for {book_id} ===")
 
-            # Only clear relationships on fresh 3a run
-            existing_count = conn.execute("SELECT COUNT(*) FROM relationships").fetchone()[0]
+            # Only clear THIS BOOK's relationships on fresh 3a run
+            existing_count = conn.execute(
+                "SELECT COUNT(*) FROM relationships WHERE book_id = ?", [book_id]
+            ).fetchone()[0]
             if existing_count > 0:
-                print(f"  Clearing {existing_count} existing relationships for fresh Phase 3a run...")
-                conn.execute("DELETE FROM relationships")
+                print(f"  Clearing {existing_count} existing relationships for {book_id}...")
+                conn.execute("DELETE FROM relationships WHERE book_id = ?", [book_id])
 
             lines = load_book()
             chapters = conn.execute(
-                "SELECT DISTINCT chapter_number FROM sections ORDER BY chapter_number"
+                "SELECT DISTINCT chapter_number FROM sections WHERE book_id = ? ORDER BY chapter_number",
+                [book_id],
             ).fetchall()
 
             all_explicit = []
             for (ch_num,) in chapters:
                 print(f"\n  Chapter {ch_num}...")
-                rels = await discover_explicit_relationships(ch_num, lines)
+                rels = await discover_explicit_relationships(ch_num, lines, book_id)
                 print(f"    Found {len(rels)} explicit relationships")
                 all_explicit.extend(rels)
 
-            explicit_count = insert_relationships(all_explicit)
+            explicit_count = insert_relationships(all_explicit, book_id)
             print(f"\nInserted {explicit_count} explicit relationships")
-            mark_done("3a_complete")
+            mark_done("3a_complete", book_id)
 
     # Phase 3b: Semantic relationships
     if "3b" in to_run:
-        if is_done("3b_complete"):
-            print("Phase 3b already complete. Skipping.")
+        if is_done("3b_complete", book_id):
+            print(f"Phase 3b already complete for {book_id}. Skipping.")
         else:
-            print("\n=== Phase 3b: Discovering semantic relationships ===")
+            print(f"\n=== Phase 3b: Discovering semantic relationships for {book_id} ===")
             concept_dicts = load_concepts()
             semantic_rels = await discover_semantic_relationships(concept_dicts)
-            semantic_count = insert_relationships(semantic_rels)
+            semantic_count = insert_relationships(semantic_rels, book_id)
             print(f"Inserted {semantic_count} semantic relationships")
-            mark_done("3b_complete")
+            mark_done("3b_complete", book_id)
 
     # Phase 3c: Cross-chapter knowledge-based
     if "3c" in to_run:
-        if is_done("3c_complete"):
-            print("Phase 3c already complete. Skipping.")
+        if is_done("3c_complete", book_id):
+            print(f"Phase 3c already complete for {book_id}. Skipping.")
         else:
-            print("\n=== Phase 3c: Cross-chapter knowledge-based relationships ===")
+            print(f"\n=== Phase 3c: Cross-chapter knowledge-based relationships for {book_id} ===")
             concept_dicts = load_concepts()
             knowledge_rels = await discover_cross_chapter_knowledge(concept_dicts)
-            knowledge_count = insert_relationships(knowledge_rels)
+            knowledge_count = insert_relationships(knowledge_rels, book_id)
             print(f"Inserted {knowledge_count} cross-chapter knowledge relationships")
-            mark_done("3c_complete")
+            mark_done("3c_complete", book_id)
 
     # Phase 3d: Cross-chapter semantic pairs
     if "3d" in to_run:
-        if is_done("3d_complete"):
-            print("Phase 3d already complete. Skipping.")
+        if is_done("3d_complete", book_id):
+            print(f"Phase 3d already complete for {book_id}. Skipping.")
         else:
-            print("\n=== Phase 3d: Cross-chapter semantic relationships ===")
+            print(f"\n=== Phase 3d: Cross-chapter semantic relationships for {book_id} ===")
             concept_dicts = load_concepts()
             cross_sem_rels = await discover_cross_chapter_semantic(concept_dicts)
-            cross_sem_count = insert_relationships(cross_sem_rels)
+            cross_sem_count = insert_relationships(cross_sem_rels, book_id)
             print(f"Inserted {cross_sem_count} cross-chapter semantic relationships")
-            mark_done("3d_complete")
+            mark_done("3d_complete", book_id)
 
     # Phase 3e: Summary-based cross-chapter
     if "3e" in to_run:
-        if is_done("3e_complete"):
-            print("Phase 3e already complete. Skipping.")
+        if is_done("3e_complete", book_id):
+            print(f"Phase 3e already complete for {book_id}. Skipping.")
         else:
-            print("\n=== Phase 3e: Summary-based cross-chapter relationships ===")
-            summary_rels = await discover_cross_chapter_summary()
-            summary_count = insert_relationships(summary_rels)
+            print(f"\n=== Phase 3e: Summary-based cross-chapter relationships for {book_id} ===")
+            summary_rels = await discover_cross_chapter_summary(book_id)
+            summary_count = insert_relationships(summary_rels, book_id)
             print(f"Inserted {summary_count} summary-based cross-chapter relationships")
-            mark_done("3e_complete")
+            mark_done("3e_complete", book_id)
 
-    # Mark overall phase3 as complete if all sub-phases are done
-    all_done = all(is_done(f"{s}_complete") for s in all_subs)
+    # Mark overall phase3 as complete if all sub-phases are done (per book)
+    all_done = all(is_done(f"{s}_complete", book_id) for s in all_subs)
     if all_done:
-        conn.execute("""
-            INSERT OR REPLACE INTO pipeline_metadata (key, value)
-            VALUES ('phase3_complete', 'true')
-        """)
+        conn.execute(
+            "INSERT OR REPLACE INTO pipeline_metadata (key, value) VALUES (?, 'true')",
+            [f"phase3_complete:{book_id}"],
+        )
 
-    total = conn.execute("SELECT COUNT(*) FROM relationships").fetchone()[0]
-    print(f"\nTotal relationships: {total}")
+    total = conn.execute(
+        "SELECT COUNT(*) FROM relationships WHERE book_id = ?", [book_id]
+    ).fetchone()[0]
+    print(f"\nTotal relationships for {book_id}: {total}")
 
-    # Source type breakdown
     breakdown = conn.execute(
-        "SELECT source_type, COUNT(*) FROM relationships GROUP BY source_type ORDER BY COUNT(*) DESC"
+        "SELECT source_type, COUNT(*) FROM relationships WHERE book_id = ? GROUP BY source_type ORDER BY COUNT(*) DESC",
+        [book_id],
     ).fetchall()
     for source, count in breakdown:
         print(f"  {source}: {count}")
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Discover relationships between concepts via Claude.")
+    parser.add_argument(
+        "--book",
+        default=DEFAULT_BOOK_ID,
+        help=f"Book ID from config.BOOKS (default: {DEFAULT_BOOK_ID}).",
+    )
+    parser.add_argument(
+        "--sub-phases",
+        nargs="*",
+        default=None,
+        help="Optional list of sub-phases (e.g., 3a 3b). Defaults to all.",
+    )
+    args = parser.parse_args()
+
     import asyncio
-    asyncio.run(run_phase3())
+    asyncio.run(run_phase3(args.book, args.sub_phases))
 
 
 if __name__ == "__main__":

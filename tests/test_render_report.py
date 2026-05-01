@@ -366,3 +366,100 @@ async def test_render_report_enriched_tooltips_no_match_passthrough(consultation
     assert "status" not in xyz
     assert "indicators" not in xyz
     assert "failure_teaser" not in xyz
+
+
+# --- B3: tooltip shape validation ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_render_report_rejects_string_tooltips_current(consultation_cleanup):
+    """Bug #3 regression: passing string values for tooltips_current must
+    return a clean error, not crash deep in _enrich_tooltips with a cryptic
+    ``ValueError: dictionary update sequence element #0 has length 1; 2 is
+    required``."""
+    result = await match_concepts(TEST_CASE["description"], max_results=5)
+    cid = consultation_cleanup(result["consultation_id"])
+
+    for pa in TEST_CASE["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    bad_narratives = {
+        **MOCK_NARRATIVES,
+        "tooltips_current": {"MGR": "Manager (string instead of dict)"},
+    }
+
+    output = await render_report(consultation_id=cid, **bad_narratives)
+    assert "error" in output
+    err = output["error"]
+    assert "tooltips_current" in err
+    assert "MGR" in err
+    assert "str" in err  # the bad type is reported
+
+
+@pytest.mark.asyncio
+async def test_render_report_rejects_string_tooltips_target(consultation_cleanup):
+    """Same shape check, but for tooltips_target."""
+    result = await match_concepts(TEST_CASE["description"], max_results=5)
+    cid = consultation_cleanup(result["consultation_id"])
+
+    for pa in TEST_CASE["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    bad_narratives = {
+        **MOCK_NARRATIVES,
+        "tooltips_target": {"WD": "Watchdog (bad shape)"},
+    }
+
+    output = await render_report(consultation_id=cid, **bad_narratives)
+    assert "error" in output
+    err = output["error"]
+    assert "tooltips_target" in err
+    assert "WD" in err
+
+
+@pytest.mark.asyncio
+async def test_render_report_rejects_non_dict_tooltips(consultation_cleanup):
+    """Passing a list (or any non-dict) for tooltips_current must error
+    cleanly rather than crashing on iteration / ``.items()``."""
+    result = await match_concepts(TEST_CASE["description"], max_results=5)
+    cid = consultation_cleanup(result["consultation_id"])
+
+    for pa in TEST_CASE["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    bad_narratives = {
+        **MOCK_NARRATIVES,
+        "tooltips_current": ["not", "a", "dict"],
+    }
+
+    output = await render_report(consultation_id=cid, **bad_narratives)
+    assert "error" in output
+    assert "tooltips_current" in output["error"]
+    assert "list" in output["error"]
+
+
+@pytest.mark.asyncio
+async def test_render_report_accepts_empty_tooltip_dicts(consultation_cleanup):
+    """Empty tooltip dicts are valid — every entry is shape-correct (zero
+    entries to check). Diagram nodes simply get no enrichment."""
+    result = await match_concepts(TEST_CASE["description"], max_results=5)
+    cid = consultation_cleanup(result["consultation_id"])
+
+    for pa in TEST_CASE["pattern_assessments"]:
+        log_consultation_step(cid, "pattern_assessment", pa)
+
+    narratives = {
+        **MOCK_NARRATIVES,
+        "tooltips_current": {},
+        "tooltips_target": {},
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output = await render_report(
+            consultation_id=cid,
+            output_dir=tmpdir,
+            **narratives,
+        )
+
+    assert "error" not in output, output.get("error")
+    assert "path" in output

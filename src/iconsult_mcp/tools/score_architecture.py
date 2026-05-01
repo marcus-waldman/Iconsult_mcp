@@ -114,6 +114,12 @@ def _get_pattern_assessments(record: dict) -> dict[str, dict]:
 
     Normalises each pattern_id via aliases so that lookups by either old
     MATURITY_MODEL IDs, KG concept IDs, or new rubric IDs all succeed.
+
+    Latest wins: when the same canonical pattern_id is assessed more than
+    once (the underlying step log is intentionally append-only for audit /
+    critique purposes), the most recent step supersedes earlier ones. This
+    makes ``log_pattern_assessment`` idempotent at the read layer without
+    losing the audit trail.
     """
     assessments: dict[str, dict] = {}
     for step in record.get("steps", []):
@@ -122,10 +128,8 @@ def _get_pattern_assessments(record: dict) -> dict[str, dict]:
             if not raw_pid:
                 continue
             canonical = normalize_pattern_id(raw_pid)
-            # Store under canonical ID (and raw ID as fallback)
-            if canonical not in assessments:
-                assessments[canonical] = step
-            if raw_pid != canonical and raw_pid not in assessments:
+            assessments[canonical] = step
+            if raw_pid != canonical:
                 assessments[raw_pid] = step
     return assessments
 
@@ -209,14 +213,24 @@ def _compute_category_ratings(assessments: dict[str, dict]) -> dict[str, dict]:
                         "na": sum(1 for i in inds if i.get("na", False)),
                     }
 
-                pattern_details.append({
+                detail = {
                     "pattern_id": p["id"],
                     "pattern_name": p["name"],
                     "status": status,
                     "met": met,
                     "evidence": a.get("evidence", "") if a else "",
                     "indicator_summary": indicator_summary,
-                })
+                }
+                # Phase 5a: provenance attribution. Surface source_book_id and
+                # canonical_concept_id when the assessment carries them; keep
+                # the keys absent (not None) when missing so legacy / single-
+                # book consultations produce byte-identical output.
+                if a:
+                    if a.get("source_book_id"):
+                        detail["source_book_id"] = a["source_book_id"]
+                    if a.get("canonical_concept_id"):
+                        detail["canonical_concept_id"] = a["canonical_concept_id"]
+                pattern_details.append(detail)
 
             level_results[lv] = {
                 "met": all_met,
@@ -461,23 +475,43 @@ async def score_architecture(
         if pid in assessments and not _is_pattern_met(assessments.get(pid))
     )
 
+    overall_summary = {
+        "total_patterns_in_rubric": len(ALL_PATTERN_IDS),
+        "total_assessed": total_assessed,
+        "implemented": implemented,
+        "not_met": not_met,
+        "not_applicable": not_applicable,
+        "categories_assessed": sum(
+            1 for c in category_ratings.values() if c["rating"] != "not_started"
+        ),
+        "categories_not_started": sum(
+            1 for c in category_ratings.values() if c["rating"] == "not_started"
+        ),
+    }
+
+    # Phase 5a: by_source_book rollup. Count assessed rubric patterns by their
+    # source_book_id so a multi-book consultation can answer "how much evidence
+    # came from each book?" at a glance. Only emitted when at least one
+    # assessment carries provenance — legacy / single-book consultations keep
+    # their existing overall_summary shape verbatim. Each rubric pattern is
+    # counted at most once (under its canonical pattern_id) even if logged
+    # multiple times via aliases.
+    by_source_book: dict[str, int] = {}
+    for pid in ALL_PATTERN_IDS:
+        a = assessments.get(pid)
+        if not a:
+            continue
+        sbid = a.get("source_book_id")
+        if sbid:
+            by_source_book[sbid] = by_source_book.get(sbid, 0) + 1
+    if by_source_book:
+        overall_summary["by_source_book"] = by_source_book
+
     return {
         "consultation_id": consultation_id,
         "scoring_method": "category-based rubric (Ch. 12)",
         "categories": category_ratings,
-        "overall_summary": {
-            "total_patterns_in_rubric": len(ALL_PATTERN_IDS),
-            "total_assessed": total_assessed,
-            "implemented": implemented,
-            "not_met": not_met,
-            "not_applicable": not_applicable,
-            "categories_assessed": sum(
-                1 for c in category_ratings.values() if c["rating"] != "not_started"
-            ),
-            "categories_not_started": sum(
-                1 for c in category_ratings.values() if c["rating"] == "not_started"
-            ),
-        },
+        "overall_summary": overall_summary,
         "coverage_warnings": coverage_warnings,
         "gap_analysis": gaps,
         "recommended_metrics": recommended_metrics,

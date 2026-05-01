@@ -8,6 +8,7 @@ Content starts at line ~985 (Part 1). Chapter boundaries are marked by
 standalone \\section*{N} followed by \\section*{Title}.
 """
 
+import argparse
 import hashlib
 import re
 import sys
@@ -15,13 +16,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from iconsult_mcp.config import LITERATURE_DIR, BOOK_FILENAME
-from iconsult_mcp.db import get_connection
+from iconsult_mcp.config import get_book_paths, list_registered_books
+from iconsult_mcp.db import get_book, get_connection
+
+DEFAULT_BOOK_ID = "arsanjani_2026"
 
 SECTION_RE = re.compile(r"^\\section\*\{(.+?)\}\s*$")
-CONTENT_START_LINE = 985  # Part 1 starts here
 
-# Chapter info extracted from TOC: (chapter_number, title, part, approx_page_start)
+# Hardcoded fallback values for arsanjani_2026 — used when the books row
+# (chapter_boundaries) hasn't been seeded yet. Once the books table is
+# populated via scripts/seed_books_table.py these are no longer consulted.
+CONTENT_START_LINE = 985
+
 CHAPTERS = [
     (1, "GenAI in the Enterprise: Landscape, Maturity, and Agent Focus", 1, 3),
     (2, "Agent-Ready LLMs: Selection, Deployment, and Adaptation", 1, 25),
@@ -41,7 +47,6 @@ CHAPTERS = [
     (16, "The Future of Agentic AI", 3, 519),
 ]
 
-# Chapter line markers discovered by grep: chapter_number -> line_number
 CHAPTER_LINES = {
     1: 996, 2: 1415, 3: 2018, 4: 2806, 5: 3262, 6: 4807,
     7: 5342, 8: 7338, 9: 8049, 10: 8775, 11: 9532,
@@ -49,14 +54,41 @@ CHAPTER_LINES = {
 }
 
 
+def load_boundaries_from_db(book_id: str) -> bool:
+    """Populate module-level CHAPTERS / CHAPTER_LINES / CONTENT_START_LINE
+    from books.chapter_boundaries. Returns True if loaded, False if absent.
+    """
+    global CHAPTERS, CHAPTER_LINES, CONTENT_START_LINE
+    row = get_book(book_id)
+    if not row or not row.get("chapter_boundaries"):
+        return False
+    boundaries = row["chapter_boundaries"]
+    CONTENT_START_LINE = boundaries.get("content_start_line", CONTENT_START_LINE)
+    chapters = boundaries.get("chapters", [])
+    if not chapters:
+        return False
+    CHAPTERS = [
+        (c["number"], c["title"], c["part"], c["page_start"]) for c in chapters
+    ]
+    CHAPTER_LINES = {
+        c["number"]: c["line_start"] for c in chapters if c.get("line_start") is not None
+    }
+    return True
+
+
 def slugify_section(title: str, chapter_number: int) -> str:
-    """Create a section ID from chapter number and title."""
+    """Create a bare section slug (no book prefix)."""
     slug = title.lower().strip()
     slug = re.sub(r"[^a-z0-9]+", "_", slug)
     slug = slug.strip("_")
     if len(slug) > 60:
         slug = slug[:60]
     return f"ch{chapter_number:02d}_{slug}"
+
+
+def make_section_id(book_id: str, title: str, chapter_number: int) -> str:
+    """Generate a book-namespaced section ID: `{book_id}__ch{NN}_{slug}`."""
+    return f"{book_id}__{slugify_section(title, chapter_number)}"
 
 
 def get_chapter_for_line(line_num: int) -> tuple[int, int] | None:
@@ -121,7 +153,7 @@ def approx_page_for_line(line_num: int) -> int | None:
     return None
 
 
-def parse_book(book_path: Path) -> list[dict]:
+def parse_book(book_path: Path, book_id: str) -> list[dict]:
     """Parse the book markdown into sections.
 
     Returns list of dicts with: id, title, chapter_number, part_number,
@@ -180,7 +212,7 @@ def parse_book(book_path: Path) -> list[dict]:
 
         chapter_number, part_number = ch_info
 
-        section_id = slugify_section(title, chapter_number)
+        section_id = make_section_id(book_id, title, chapter_number)
         page_start = approx_page_for_line(line_start)
         page_end = approx_page_for_line(line_end)
 
@@ -198,23 +230,23 @@ def parse_book(book_path: Path) -> list[dict]:
     return sections
 
 
-def insert_sections(sections: list[dict]):
-    """Insert parsed sections into the database."""
+def insert_sections(sections: list[dict], book_id: str, book_path: Path):
+    """Insert parsed sections (book-scoped) into the database."""
     conn = get_connection()
 
-    # Idempotency check
+    metadata_key = f"book_hash:{book_id}"
     existing = conn.execute(
-        "SELECT value FROM pipeline_metadata WHERE key = 'book_hash'"
+        "SELECT value FROM pipeline_metadata WHERE key = ?",
+        [metadata_key],
     ).fetchone()
 
-    book_path = LITERATURE_DIR / BOOK_FILENAME
     current_hash = hashlib.md5(book_path.read_bytes()).hexdigest()
 
     if existing and existing[0] == current_hash:
-        print(f"Book already parsed (hash {current_hash[:8]}). Skipping.")
+        print(f"Book already parsed for {book_id} (hash {current_hash[:8]}). Skipping.")
         return
 
-    conn.execute("DELETE FROM sections")
+    conn.execute("DELETE FROM sections WHERE book_id = ?", [book_id])
 
     inserted = 0
     seen_ids = set()
@@ -230,32 +262,56 @@ def insert_sections(sections: list[dict]):
             conn.execute(
                 """INSERT INTO sections
                    (id, title, chapter_number, part_number,
-                    line_start, line_end, approx_page_start, approx_page_end)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    line_start, line_end, approx_page_start, approx_page_end, book_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [sid, s["title"], s["chapter_number"], s["part_number"],
                  s["line_start"], s["line_end"],
-                 s["approx_page_start"], s["approx_page_end"]],
+                 s["approx_page_start"], s["approx_page_end"], book_id],
             )
             inserted += 1
         except Exception as e:
             print(f"  Warning: skipping section '{s['title']}': {e}")
 
-    conn.execute("""
-        INSERT OR REPLACE INTO pipeline_metadata (key, value)
-        VALUES ('book_hash', ?)
-    """, [current_hash])
+    conn.execute(
+        "INSERT OR REPLACE INTO pipeline_metadata (key, value) VALUES (?, ?)",
+        [metadata_key, current_hash],
+    )
 
-    print(f"Inserted {inserted} sections from book.")
+    print(f"Inserted {inserted} sections from book for {book_id}.")
 
 
 def main():
-    book_path = LITERATURE_DIR / BOOK_FILENAME
+    parser = argparse.ArgumentParser(description="Parse a book markdown into the sections table.")
+    parser.add_argument(
+        "--book",
+        default=DEFAULT_BOOK_ID,
+        help=f"Book ID from config.BOOKS (default: {DEFAULT_BOOK_ID}).",
+    )
+    args = parser.parse_args()
+    book_id = args.book
+
+    if load_boundaries_from_db(book_id):
+        print(f"Loaded chapter_boundaries for {book_id} from books table.")
+    else:
+        if book_id != DEFAULT_BOOK_ID:
+            print(
+                f"ERROR: No chapter_boundaries in books table for '{book_id}'. "
+                "Run scripts/seed_books_table.py first."
+            )
+            sys.exit(1)
+        print(f"Using hardcoded chapter_boundaries fallback for {book_id}.")
+
+    paths = get_book_paths(book_id)
+    book_path = paths["book"]
     if not book_path.exists():
-        print(f"ERROR: Book file not found: {book_path}")
+        print(
+            f"ERROR: Book file not found for '{book_id}': {book_path}\n"
+            f"Registered books: {list_registered_books()}"
+        )
         sys.exit(1)
 
-    print(f"Parsing book: {book_path.name}")
-    sections = parse_book(book_path)
+    print(f"Parsing book for {book_id}: {book_path.name}")
+    sections = parse_book(book_path, book_id)
     print(f"Found {len(sections)} sections across {len(set(s['chapter_number'] for s in sections))} chapters")
 
     # Print chapter breakdown
@@ -265,7 +321,7 @@ def main():
         title = next(t for c, t, _, _ in CHAPTERS if c == ch)
         print(f"  Ch {ch}: {ch_counts[ch]} sections — {title[:50]}")
 
-    insert_sections(sections)
+    insert_sections(sections, book_id, book_path)
 
 
 if __name__ == "__main__":

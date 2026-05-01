@@ -1,5 +1,5 @@
 """
-Phase 4: Build and validate the final knowledge graph.
+Phase 4: Build and validate the final knowledge graph (book-scoped).
 
 - Deduplicate relationships
 - Remove very low confidence edges
@@ -8,6 +8,7 @@ Phase 4: Build and validate the final knowledge graph.
 - Write stats to pipeline_metadata
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -16,31 +17,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from iconsult_mcp.db import get_connection, get_stats
 from iconsult_mcp.embed import embed_texts
 
+DEFAULT_BOOK_ID = "arsanjani_2026"
 MIN_CONFIDENCE = 0.3
 
 
-async def deduplicate_relationships():
-    """Remove duplicate relationships (same concept pair + type, keep highest confidence)."""
+async def deduplicate_relationships(book_id: str):
+    """Remove duplicate relationships for one book (keep highest confidence)."""
     conn = get_connection()
 
-    # Find duplicates
     dupes = conn.execute("""
         SELECT from_concept_id, to_concept_id, relationship_type, COUNT(*) as cnt
         FROM relationships
+        WHERE book_id = ?
         GROUP BY from_concept_id, to_concept_id, relationship_type
         HAVING cnt > 1
-    """).fetchall()
+    """, [book_id]).fetchall()
 
     removed = 0
     for from_id, to_id, rel_type, count in dupes:
-        # Keep the one with highest confidence, delete the rest
         rows = conn.execute("""
             SELECT id, confidence FROM relationships
-            WHERE from_concept_id = ? AND to_concept_id = ? AND relationship_type = ?
+            WHERE from_concept_id = ? AND to_concept_id = ?
+              AND relationship_type = ? AND book_id = ?
             ORDER BY confidence DESC
-        """, [from_id, to_id, rel_type]).fetchall()
+        """, [from_id, to_id, rel_type, book_id]).fetchall()
 
-        # Delete all except the first (highest confidence)
         for row_id, _ in rows[1:]:
             conn.execute("DELETE FROM relationships WHERE id = ?", [row_id])
             removed += 1
@@ -49,20 +50,19 @@ async def deduplicate_relationships():
     return removed
 
 
-async def remove_low_confidence():
-    """Remove relationships below the minimum confidence threshold."""
+async def remove_low_confidence(book_id: str):
+    """Remove relationships below the minimum confidence threshold (book-scoped)."""
     conn = get_connection()
 
-    result = conn.execute(
-        "SELECT COUNT(*) FROM relationships WHERE confidence < ?",
-        [MIN_CONFIDENCE],
-    ).fetchone()
-    count = result[0]
+    count = conn.execute(
+        "SELECT COUNT(*) FROM relationships WHERE confidence < ? AND book_id = ?",
+        [MIN_CONFIDENCE, book_id],
+    ).fetchone()[0]
 
     if count > 0:
         conn.execute(
-            "DELETE FROM relationships WHERE confidence < ?",
-            [MIN_CONFIDENCE],
+            "DELETE FROM relationships WHERE confidence < ? AND book_id = ?",
+            [MIN_CONFIDENCE, book_id],
         )
         print(f"  Removed {count} low-confidence relationships (< {MIN_CONFIDENCE})")
     else:
@@ -71,16 +71,16 @@ async def remove_low_confidence():
     return count
 
 
-async def generate_concept_embeddings():
-    """Generate embeddings for concepts that don't have them yet."""
+async def generate_concept_embeddings(book_id: str):
+    """Generate embeddings for this book's concepts that don't have them yet."""
     conn = get_connection()
 
     rows = conn.execute("""
         SELECT c.id, c.name, c.definition
         FROM concepts c
         LEFT JOIN concept_embeddings ce ON c.id = ce.concept_id
-        WHERE ce.concept_id IS NULL
-    """).fetchall()
+        WHERE ce.concept_id IS NULL AND c.book_id = ?
+    """, [book_id]).fetchall()
 
     if not rows:
         print("  All concepts already have embeddings")
@@ -89,8 +89,8 @@ async def generate_concept_embeddings():
     ids = [r[0] for r in rows]
     texts = []
     for r in rows:
-        text = r[1]  # name
-        if r[2]:  # definition
+        text = r[1]
+        if r[2]:
             text += f": {r[2]}"
         texts.append(text)
 
@@ -110,34 +110,32 @@ async def generate_concept_embeddings():
     return len(embeddings)
 
 
-async def generate_section_embeddings():
-    """Generate embeddings for sections using title + content.
-
-    Deletes existing section embeddings first so they get regenerated
-    with real book content instead of title-only.
-    """
+async def generate_section_embeddings(book_id: str):
+    """Re-embed this book's sections using title + truncated content."""
     conn = get_connection()
 
-    # Delete existing embeddings so all sections get re-embedded with content
-    conn.execute("DELETE FROM section_embeddings")
-    print("  Cleared existing section embeddings for re-generation")
+    # Delete only this book's section embeddings (join via sections.book_id)
+    conn.execute("""
+        DELETE FROM section_embeddings
+        WHERE section_id IN (SELECT id FROM sections WHERE book_id = ?)
+    """, [book_id])
+    print(f"  Cleared existing section embeddings for {book_id}")
 
-    rows = conn.execute("""
-        SELECT s.id, s.title, s.content
-        FROM sections s
-    """).fetchall()
+    rows = conn.execute(
+        "SELECT s.id, s.title, s.content FROM sections s WHERE s.book_id = ?",
+        [book_id],
+    ).fetchall()
 
     if not rows:
         print("  No sections found")
         return 0
 
-    # Build embedding texts: title + truncated content (~3000 tokens ≈ 2300 words)
     MAX_CONTENT_WORDS = 2300
     ids = [r[0] for r in rows]
     texts = []
     for r in rows:
-        text = r[1]  # title
-        if r[2]:  # content
+        text = r[1]
+        if r[2]:
             words = r[2].split()
             truncated = " ".join(words[:MAX_CONTENT_WORDS])
             text += ": " + truncated
@@ -145,7 +143,6 @@ async def generate_section_embeddings():
 
     print(f"  Embedding {len(texts)} sections in chunks...")
 
-    # Process in chunks of 30, saving to DB after each chunk
     chunk_size = 30
     total_embedded = 0
     for i in range(0, len(texts), chunk_size):
@@ -174,62 +171,62 @@ async def generate_section_embeddings():
     return total_embedded
 
 
-async def validate_graph():
-    """Validate graph integrity and report issues."""
+async def validate_graph(book_id: str):
+    """Validate this book's graph integrity and report issues."""
     conn = get_connection()
     issues = []
 
-    # Check for orphan relationships (referencing non-existent concepts)
+    # Orphan relationships within this book
     orphans = conn.execute("""
         SELECT r.id, r.from_concept_id, r.to_concept_id
         FROM relationships r
         LEFT JOIN concepts cf ON r.from_concept_id = cf.id
         LEFT JOIN concepts ct ON r.to_concept_id = ct.id
-        WHERE cf.id IS NULL OR ct.id IS NULL
-    """).fetchall()
+        WHERE r.book_id = ? AND (cf.id IS NULL OR ct.id IS NULL)
+    """, [book_id]).fetchall()
 
     if orphans:
         issues.append(f"Found {len(orphans)} relationships referencing non-existent concepts")
-        # Clean up orphans
         for r_id, _, _ in orphans:
             conn.execute("DELETE FROM relationships WHERE id = ?", [r_id])
         print(f"  Removed {len(orphans)} orphan relationships")
 
-    # Check for concept_sections referencing non-existent entities
+    # Orphan concept_sections (scoped via concepts.book_id join)
     orphan_cs = conn.execute("""
         SELECT cs.concept_id, cs.section_id
         FROM concept_sections cs
-        LEFT JOIN concepts c ON cs.concept_id = c.id
+        JOIN concepts c ON cs.concept_id = c.id
         LEFT JOIN sections s ON cs.section_id = s.id
-        WHERE c.id IS NULL OR s.id IS NULL
-    """).fetchall()
+        WHERE c.book_id = ? AND s.id IS NULL
+    """, [book_id]).fetchall()
 
     if orphan_cs:
-        issues.append(f"Found {len(orphan_cs)} concept_sections with invalid references")
+        issues.append(f"Found {len(orphan_cs)} concept_sections with invalid section references")
         conn.execute("""
             DELETE FROM concept_sections
-            WHERE concept_id NOT IN (SELECT id FROM concepts)
-               OR section_id NOT IN (SELECT id FROM sections)
-        """)
+            WHERE concept_id IN (SELECT id FROM concepts WHERE book_id = ?)
+              AND section_id NOT IN (SELECT id FROM sections)
+        """, [book_id])
         print(f"  Cleaned up {len(orphan_cs)} invalid concept_section mappings")
 
-    # Check concepts without any relationships
+    # Isolated concepts within this book
     isolated = conn.execute("""
         SELECT COUNT(*) FROM concepts c
-        WHERE c.id NOT IN (
-            SELECT from_concept_id FROM relationships
+        WHERE c.book_id = ?
+          AND c.id NOT IN (
+            SELECT from_concept_id FROM relationships WHERE book_id = ?
             UNION
-            SELECT to_concept_id FROM relationships
-        )
-    """).fetchone()[0]
+            SELECT to_concept_id FROM relationships WHERE book_id = ?
+          )
+    """, [book_id, book_id, book_id]).fetchone()[0]
 
     if isolated > 0:
         issues.append(f"{isolated} concepts have no relationships (isolated nodes)")
         print(f"  Note: {isolated} concepts are isolated (no relationships)")
 
-    # Concepts without definitions
     no_def = conn.execute(
-        "SELECT COUNT(*) FROM concepts WHERE definition IS NULL"
+        "SELECT COUNT(*) FROM concepts WHERE definition IS NULL AND book_id = ?",
+        [book_id],
     ).fetchone()[0]
     if no_def > 0:
         issues.append(f"{no_def} concepts have no definition")
@@ -238,70 +235,85 @@ async def validate_graph():
     return issues
 
 
-async def write_final_stats():
-    """Write final graph statistics to pipeline_metadata."""
+async def write_final_stats(book_id: str):
+    """Write final graph statistics for this book to pipeline_metadata."""
     conn = get_connection()
-    stats = get_stats()
+    # Note: get_stats() returns global stats; for per-book stats we re-compute
+    concept_count = conn.execute(
+        "SELECT COUNT(*) FROM concepts WHERE book_id = ?", [book_id]
+    ).fetchone()[0]
+    section_count = conn.execute(
+        "SELECT COUNT(*) FROM sections WHERE book_id = ?", [book_id]
+    ).fetchone()[0]
+    rel_count = conn.execute(
+        "SELECT COUNT(*) FROM relationships WHERE book_id = ?", [book_id]
+    ).fetchone()[0]
+    avg_conf = conn.execute(
+        "SELECT ROUND(AVG(confidence), 3) FROM relationships WHERE book_id = ?",
+        [book_id],
+    ).fetchone()[0]
 
-    for key, value in [
-        ("final_concept_count", str(stats["concepts"])),
-        ("final_section_count", str(stats["sections"])),
-        ("final_relationship_count", str(stats["relationships"])),
-        ("final_avg_confidence", str(stats["avg_relationship_confidence"])),
+    for key_suffix, value in [
+        ("final_concept_count", str(concept_count)),
+        ("final_section_count", str(section_count)),
+        ("final_relationship_count", str(rel_count)),
+        ("final_avg_confidence", str(avg_conf)),
     ]:
-        conn.execute("""
-            INSERT OR REPLACE INTO pipeline_metadata (key, value)
-            VALUES (?, ?)
-        """, [key, value])
+        conn.execute(
+            "INSERT OR REPLACE INTO pipeline_metadata (key, value) VALUES (?, ?)",
+            [f"{key_suffix}:{book_id}", value],
+        )
 
-    return stats
+    return {
+        "concepts": concept_count,
+        "sections": section_count,
+        "relationships": rel_count,
+        "avg_relationship_confidence": avg_conf,
+    }
 
 
-async def run_phase4():
-    """Run Phase 4: build and validate final graph."""
+async def run_phase4(book_id: str):
+    """Run Phase 4 for one book: build and validate final graph."""
     conn = get_connection()
 
+    metadata_key = f"phase4_complete:{book_id}"
     existing = conn.execute(
-        "SELECT value FROM pipeline_metadata WHERE key = 'phase4_complete'"
+        "SELECT value FROM pipeline_metadata WHERE key = ?", [metadata_key]
     ).fetchone()
     if existing and existing[0] == "true":
-        print("Phase 4 already complete. Skipping.")
+        print(f"Phase 4 already complete for {book_id}. Skipping.")
         return
 
-    print("=== Phase 4: Building final knowledge graph ===")
+    print(f"=== Phase 4: Building final knowledge graph for {book_id} ===")
 
     print("\n1. Deduplicating relationships...")
-    await deduplicate_relationships()
+    await deduplicate_relationships(book_id)
 
     print("\n2. Removing low-confidence edges...")
-    await remove_low_confidence()
+    await remove_low_confidence(book_id)
 
     print("\n3. Generating concept embeddings...")
-    await generate_concept_embeddings()
+    await generate_concept_embeddings(book_id)
 
     print("\n4. Generating section embeddings...")
-    await generate_section_embeddings()
+    await generate_section_embeddings(book_id)
 
     print("\n5. Validating graph integrity...")
-    issues = await validate_graph()
+    issues = await validate_graph(book_id)
 
     print("\n6. Writing final statistics...")
-    stats = await write_final_stats()
+    stats = await write_final_stats(book_id)
 
-    conn.execute("""
-        INSERT OR REPLACE INTO pipeline_metadata (key, value)
-        VALUES ('phase4_complete', 'true')
-    """)
+    conn.execute(
+        "INSERT OR REPLACE INTO pipeline_metadata (key, value) VALUES (?, 'true')",
+        [metadata_key],
+    )
 
-    print("\n=== Final Graph Statistics ===")
+    print(f"\n=== Final Graph Statistics for {book_id} ===")
     print(f"  Concepts: {stats['concepts']}")
     print(f"  Sections: {stats['sections']}")
     print(f"  Relationships: {stats['relationships']}")
     print(f"  Avg confidence: {stats['avg_relationship_confidence']}")
-    if stats.get("relationship_types"):
-        print("  Relationship types:")
-        for rt, count in stats["relationship_types"].items():
-            print(f"    {rt}: {count}")
     if issues:
         print(f"  Validation issues: {len(issues)}")
         for issue in issues:
@@ -309,8 +321,16 @@ async def run_phase4():
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Build and validate the final knowledge graph for one book.")
+    parser.add_argument(
+        "--book",
+        default=DEFAULT_BOOK_ID,
+        help=f"Book ID from config.BOOKS (default: {DEFAULT_BOOK_ID}).",
+    )
+    args = parser.parse_args()
+
     import asyncio
-    asyncio.run(run_phase4())
+    asyncio.run(run_phase4(args.book))
 
 
 if __name__ == "__main__":

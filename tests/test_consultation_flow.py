@@ -87,7 +87,7 @@ async def test_consultation_report_tracks_steps(consultation_cleanup):
 
     # Log a subgraph step
     log_consultation_step(cid, "subgraph_query", {
-        "concept_ids": ["supervisor_architecture"],
+        "concept_ids": ["arsanjani_2026__supervisor_architecture"],
         "nodes_found": 5,
     })
 
