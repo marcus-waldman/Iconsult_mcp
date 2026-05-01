@@ -152,6 +152,8 @@ TOOL_DISPATCH = {
         evidence=args.get("evidence", ""),
         maturity_level=args.get("maturity_level", 1),
         failure_context=args.get("failure_context"),
+        category=args.get("category", ""),
+        indicators=args.get("indicators"),
         source_book_id=args.get("source_book_id"),
         canonical_concept_id=args.get("canonical_concept_id"),
     ),
@@ -851,6 +853,27 @@ async def list_tools() -> list[Tool]:
                             "failure_mode (string describing what breaks), "
                             "depends_on (list of pattern_ids this depends on)"
                         ),
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Rubric category key (e.g., 'coordination', "
+                            "'robustness'). Auto-resolved from pattern_id via the "
+                            "Ch. 12 rubric if omitted."
+                        ),
+                    },
+                    "indicators": {
+                        "type": "array",
+                        "description": (
+                            "Optional. Binary indicator assessments from the Ch. 12 "
+                            "rubric for this pattern. Each entry: "
+                            "{text: string, met: bool, na: bool (optional)}. When "
+                            "supplied (and status is not 'not_applicable'), status "
+                            "is auto-computed: all met -> 'implemented', else -> "
+                            "'missing'. Surfaced into score_architecture's "
+                            "missing_indicators per-pattern gap analysis."
+                        ),
+                        "items": {"type": "object"},
                     },
                     "source_book_id": {
                         "type": "string",
