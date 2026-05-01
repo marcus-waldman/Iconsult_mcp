@@ -237,7 +237,25 @@ def _get_rubric_description(pattern_id: str) -> str:
     return ""
 
 
-def _render_scorecard_rows(categories: dict, recommendation_narratives: dict | None) -> str:
+def _book_badge(source_book_id: str | None) -> str:
+    """Render a subtle inline badge for a source book id, or empty string when absent.
+
+    Phase 5c: gray monospace tag e.g. `[gulli_2025]` rendered next to a
+    pattern name or scenario title to attribute multi-book provenance.
+    """
+    if not source_book_id:
+        return ""
+    return (
+        f'<span class="book-badge" title="Source: {_esc(source_book_id)}">'
+        f'[{_esc(source_book_id)}]</span>'
+    )
+
+
+def _render_scorecard_rows(
+    categories: dict,
+    recommendation_narratives: dict | None,
+    show_book_badges: bool = False,
+) -> str:
     """Render separate scorecard tables per category."""
     rec_narr = recommendation_narratives or {}
 
@@ -312,12 +330,19 @@ def _render_scorecard_rows(categories: dict, recommendation_narratives: dict | N
                 if ind_summary:
                     ind_text = f' ({ind_summary["met"]}/{ind_summary["total"]})'
 
+                # Phase 5c: provenance badge next to the pattern name when
+                # this consultation has any multi-book attribution.
+                badge_html = (
+                    _book_badge(p.get("source_book_id"))
+                    if show_book_badges else ""
+                )
+
                 lines.append('  <tr>')
                 lines.append(
                     f'    <td class="has-tooltip" data-tt-title="{_esc(name)}"'
                     f' data-tt-desc="{tooltip_detail}"'
                     f' data-tt-ref="{_esc(book_ref)}">'
-                    f'<strong>{_esc(name)}</strong></td>'
+                    f'<strong>{_esc(name)}</strong>{badge_html}</td>'
                 )
                 lines.append(f'    <td class="level-cell">{_esc(level_name.title())}</td>')
                 # Status badge — evidence shown via tooltip on hover
@@ -629,7 +654,10 @@ def _render_failure_chain(failure_chain: dict) -> str:
     return "\n".join(lines)
 
 
-def _render_stress_test(scenarios: list[dict]) -> str:
+def _render_stress_test(
+    scenarios: list[dict],
+    show_book_badges: bool = False,
+) -> str:
     """Render collapsible stress test scenarios."""
     lines = []
     lines.append('<p class="subtitle">Concrete scenarios illustrating how strengthening partial patterns protects the system.</p>')
@@ -645,11 +673,20 @@ def _render_stress_test(scenarios: list[dict]) -> str:
         recovery = scenario.get("recovery", "")
         inverted = scenario.get("inverted_pyramid")
 
+        # Phase 5c: provenance badge next to scenario title when this
+        # consultation has multi-book attribution. Suppressed for legacy /
+        # single-book consultations where the 5b default ("arsanjani_2026")
+        # would otherwise clutter every scenario summary.
+        badge_html = (
+            _book_badge(scenario.get("source_book_id"))
+            if show_book_badges else ""
+        )
+
         lines.append('')
         lines.append('<details class="scenario ani">')
         lines.append('  <summary>')
         lines.append(f'    <span class="severity-tag {sev_css}">{_esc(severity)}</span>')
-        lines.append(f'    {_esc(title)}')
+        lines.append(f'    {_esc(title)}{badge_html}')
         lines.append('  </summary>')
         lines.append('  <div class="scenario-body">')
 
@@ -755,6 +792,15 @@ async def render_report(
     scenarios = scenario_data.get("scenarios", [])
     failure_chain = scenario_data.get("failure_chain", {})
 
+    # Phase 5c: a consultation is "multi-book aware" when at least one
+    # logged pattern_assessment carried source_book_id — score_architecture
+    # surfaces that as `overall_summary["by_source_book"]`. The flag gates
+    # whether provenance badges render anywhere in the report. Legacy /
+    # single-book consultations produce byte-identical output to today.
+    show_book_badges = bool(
+        score_data.get("overall_summary", {}).get("by_source_book")
+    )
+
     # Fetch concept definitions for recommendation cards
     gap_pids = [g["pattern_id"] for phase in roadmap for g in phase.get("patterns", [])]
     concept_defs = _get_concept_definitions(gap_pids)
@@ -782,11 +828,11 @@ async def render_report(
         "exec_brief": _render_exec_brief(executive_brief),
         "maturity_banner": _render_maturity_banner(categories),
         "system_section": _render_system_section(system_description, agents),
-        "scorecard_rows": _render_scorecard_rows(categories, recommendation_narratives),
+        "scorecard_rows": _render_scorecard_rows(categories, recommendation_narratives, show_book_badges),
         "diagrams": _render_diagrams(diagram_current, diagram_target, tooltips_current, tooltips_target),
         "recommendations": _render_recommendations(roadmap, recommendation_narratives, concept_defs),
         "failure_chain": _render_failure_chain(failure_chain),
-        "stress_test": _render_stress_test(scenarios),
+        "stress_test": _render_stress_test(scenarios, show_book_badges),
         "footer": _render_footer(consultation_id, date),
         "tooltip_scripts": _render_tooltip_scripts(enriched_current, enriched_target),
     }
