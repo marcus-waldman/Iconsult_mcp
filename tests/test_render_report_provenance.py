@@ -200,6 +200,62 @@ async def test_unassessed_sibling_pattern_has_no_badge(consultation_cleanup):
     )
 
 
+# --- stress-test side specifically -----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stress_test_scenario_carries_badge(consultation_cleanup):
+    """A multi-book consultation with a missing pattern that has a
+    PATTERN_FAILURE_TEMPLATES entry (watchdog_timeout) → the rendered
+    HTML contains a book-badge inside the stress-test scenario block,
+    not just in the scorecard. Closes the unit-test gap that
+    test_multi_book_consultation_emits_badges left open (its missing
+    pattern didn't have a template, so no scenario rendered)."""
+    cid = consultation_cleanup("phase5c_stress_001")
+    _make_consultation(cid, project_id="proj_phase5c_stress")
+
+    # Implemented arsanjani assessment to flip on multi-book mode...
+    await log_pattern_assessment(
+        consultation_id=cid,
+        pattern_id="supervisor_architecture",
+        pattern_name="Supervisor Architecture",
+        status="implemented",
+        source_book_id="arsanjani_2026",
+    )
+    # ...plus a missing watchdog_timeout (which IS in PATTERN_FAILURE_TEMPLATES)
+    # so a scenario will be generated. Tag it gulli_2025 so we can assert the
+    # specific badge that landed in the stress test.
+    await log_pattern_assessment(
+        consultation_id=cid,
+        pattern_id="watchdog_timeout",
+        pattern_name="Watchdog Timeout",
+        status="missing",
+        source_book_id="gulli_2025",
+    )
+    flush_consultation_steps(cid)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = await _do_render(cid, tmpdir)
+        assert result.get("scenarios_rendered", 0) >= 1, (
+            "expected at least one scenario for missing watchdog_timeout"
+        )
+        with open(result["path"], "r", encoding="utf-8") as f:
+            html = f.read()
+
+    # Pull the stress-test region (everything after the SLOT had a
+    # <details class="scenario") and check a badge is in there.
+    # A simple substring check on '<details class="scenario' onwards.
+    idx = html.find('<details class="scenario')
+    assert idx != -1, "Expected at least one rendered scenario block"
+    stress_html = html[idx:]
+    assert re.search(
+        r'<span class="book-badge"[^>]*>\[gulli_2025\]</span>', stress_html
+    ), (
+        "Expected the gulli_2025 badge to appear inside a scenario block "
+        "(stress-test side of 5c, not just the scorecard)"
+    )
+
+
 # --- CSS class ships with the template -------------------------------------
 
 
