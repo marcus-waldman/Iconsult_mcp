@@ -1,8 +1,12 @@
-# Post-Phase-6 follow-ups — report rendering polish
+# Post-Phase-6 follow-ups
 
-Three issues surfaced while reviewing the rendered Phase 6 6b/6c HTML reports. None block the multi-book merge gate — the comparison signal (rubric stability, cross-book canonical clusters, gulli passage diversity, provenance badges) reads clearly on the current reports. But each visibly degrades the report quality a stakeholder sees. All three are render-layer fixes that pre-existed the multi-book refactor; multi-book made them more visible.
+Issues surfaced during and after the Phase 6 merge gate review. None block the multi-book merge — the comparison signal (rubric stability, cross-book canonical clusters, gulli passage diversity, provenance badges) reads clearly on the current reports. But each addresses visible quality gaps or unblocks higher-leverage downstream work.
 
-This file is the canonical scope spec. Each section below is referenced from a corresponding GitHub issue. The work is a single side branch (`fix/report-rendering-polish`, three commits, mirrors the B1-B7 pattern) once someone picks it up post-merge.
+- **B8a/b/c** are render-layer polish — pre-existed the multi-book refactor; multi-book made them more visible.
+- **B9** is the keystone for "implementation focus" — turns gulli's implementation-altitude content into actionable instructions in the implementation plan.
+- **B10** closes the "boost rubric scores" feedback loop — surfaces cross-consultation rubric progress so users can see whether their implementation moved the needle.
+
+This file is the canonical scope spec. Each section below is referenced from a corresponding GitHub issue. **B8a/b/c** would land as one side branch (`fix/report-rendering-polish`); **B9** as its own initiative (with `docs/todo/b9-briefing.md` as the planning doc); **B10** as a small standalone change.
 
 **Source reports for reproduction:**
 - `~/.agent/diagrams/phase6-baseline-7465fccc4320_20260501_053206.html` (single-book, all `arsanjani_2026`)
@@ -17,6 +21,7 @@ This file is the canonical scope spec. Each section below is referenced from a c
 - [ ] **B8b — Scorecard tooltips: many patterns have no description; chapter refs lack book qualifier on multi-book consultations**
 - [ ] **B8c — Implementation Recommendations need "why this matters for your system" + per-card citations**
 - [ ] **B9 — `generate_implementation_plan` should leverage cross-book canonical clusters for concrete code-level steps**
+- [ ] **B10 — `consultation_report` cross-session comparison should surface rubric-rating progress, not just coverage delta**
 
 ---
 
@@ -238,6 +243,70 @@ The Phase 6 comparison memo's qualitative read flagged this as the **largest pro
 
 ---
 
+## B10 — `consultation_report` cross-session comparison should surface rubric-rating progress
+
+### Symptom
+
+`consultation_report(consultation_id, compare_to=<earlier_id>)` already produces a cross-session diff today, but the diff is *coverage-only*: concept overlap, coverage delta (concept_coverage / rel_type_coverage scalar diffs), relationship-type set differences, and bare metadata. It does **not** surface the signal a user actually wants when they re-consult after implementing changes:
+
+- Did `supervisor_architecture` move from `missing → implemented`?
+- Did the Coordination & Planning rating advance from `emerging → established`?
+- Did the user's implementation work move the rubric needle, or not?
+
+Today, to answer that question, the user has to manually `score_architecture` both consultations and diff the JSON in their head — or eyeball two HTML reports side-by-side. The "boost rubric scores" feedback loop that B9 enables on the *output* side has no mirror on the *measurement* side.
+
+### Root cause
+
+`tools/consultation_report.py::_compare` was implemented before the Ch. 12 category-based rubric work and before pattern-assessment provenance landed. It compares matched-concept sets and coverage scalars but never reads the `pattern_assessment` step entries or recomputes scores. The data is all there in both consultation records — the comparison just doesn't surface it.
+
+### Suggested fix
+
+Extend `_compare` to add a `rubric_progress` block alongside the existing `concept_overlap` / `coverage_delta` / `relationship_types` blocks. The block should include:
+
+- **Per-pattern status changes**: list of patterns whose status changed between the two consultations (`{pattern_id, pattern_name, before, after}`). Status diff direction is intuitive (e.g., `missing → implemented` is forward progress; `implemented → missing` is regression).
+- **Per-category rating movement**: list of categories whose rating advanced or regressed (`{category, before_rating, after_rating, direction}`). Direction is `forward` / `backward` / `unchanged` based on the rating-priority map already used in `_compute_roadmap` (`not_started < emerging < established < mature`).
+- **Newly-assessed-only**: patterns assessed in the newer consultation but not the earlier one. Useful for cases where the user expanded coverage rather than implementing existing gaps.
+- **Provenance shift**: optional `by_source_book_delta` showing whether attribution changed (e.g., `arsanjani: -1, gulli: +1` if a pattern's evidence shifted from arsanjani-driven to gulli-driven). Empty when neither consultation has provenance fields populated.
+
+All four are computed deterministically from the two records' step entries + the existing rubric in `rubric_data.py`. No LLM calls. No schema changes.
+
+**Optional follow-on**: when `compare_to` is omitted but a prior consultation exists for the same `project_fingerprint`, auto-look-up the most recent prior consultation as the comparison target. The helper `get_consultations_by_fingerprint` already exists in `db.py`. Default `compare_to=None` stays as today (no-op when no prior); auto-pickup would be opt-in via a new flag like `compare_to="prior"` to avoid surprising existing callers.
+
+### Files
+
+- `src/iconsult_mcp/tools/consultation_report.py` — `_compare` extension
+- `src/iconsult_mcp/server.py` — no MCP surface change unless adding the `compare_to="prior"` opt-in (would need a one-line schema description update)
+- `tests/test_consultation_report*.py` — new regression tests (forward progress, regression, newly-assessed-only, provenance shift, auto-pickup if implemented)
+
+### Reuse — don't reinvent
+
+- **`_get_pattern_assessments`** in `score_architecture.py` — already field-agnostic; returns the full assessment dict per pattern. Use it on both records.
+- **`_compute_category_ratings`** in `score_architecture.py` — already deterministic. Call it on both records, diff the outputs.
+- **Rating priority map** is already encoded in `_compute_roadmap` (`not_started < emerging < established < mature`).
+- **`get_consultations_by_fingerprint`** in `db.py` — used by the optional auto-pickup path.
+
+### Scope risk
+
+Low. The change is purely additive to a tool's response shape; existing keys stay verbatim. Backward compat is trivial because the `compare_to` parameter is opt-in. The `auto-pickup` opt-in (if pursued) needs careful default behaviour to avoid a regression for callers passing `compare_to=None` deliberately.
+
+### Effort
+
+~1-2 hours for the diff extension + tests; +1 hour if the auto-pickup opt-in is added.
+
+### Acceptance criteria
+
+- For two consultations on the same `project_fingerprint` (same code re-consulted after implementation work), `consultation_report(consultation_id=newer, compare_to=earlier)` returns a `rubric_progress` block listing pattern status changes and category rating movement.
+- Diff direction (`forward` / `backward` / `unchanged`) is correct against the rating-priority map.
+- Patterns assessed in only one consultation surface in `newly_assessed_only`.
+- For multi-book consultations: `by_source_book_delta` reflects attribution shifts when both consultations have provenance.
+- Single-book / legacy consultations: existing comparison response shape preserved verbatim; new `rubric_progress` block present but with empty lists if no assessments differ.
+
+### Why this matters
+
+Closes the "boost rubric scores up" feedback loop on the measurement side. B9 makes the implementation plan *say* what to do; B10 makes the next consultation *show* whether it worked. Together they turn iconsult from a one-shot recommendation tool into a continuous-improvement workflow — which is the user's stated goal post-merge.
+
+---
+
 ## Recommended ordering
 
 If a single side branch picks B8a/b/c up:
@@ -249,6 +318,8 @@ If a single side branch picks B8a/b/c up:
 Each as a separate commit. Branch off `feat/multi-book-kg` (or off `main` after the multi-book merge — same diff). Re-render the Phase 6 reports against the polished pipeline; the consultation_ids in the DB make this a one-liner.
 
 **B9 is its own initiative** — separate from the B8 polish branch. Likely benefits from a fresh briefing doc (`docs/todo/b9-briefing.md`) before implementation. Not blocked by the B8 work but doesn't share much code path with it either.
+
+**B10 is independent and small** — fits in a 1-2 hour standalone commit. Pairs with B9 (B9 makes the plan actionable; B10 makes the progress visible) but they touch different code paths and either can ship first.
 
 ## What does NOT change
 
