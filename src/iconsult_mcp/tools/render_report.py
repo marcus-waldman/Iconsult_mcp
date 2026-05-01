@@ -454,6 +454,30 @@ def _match_node_to_pattern(
 _MAX_TOOLTIP_INDICATORS = 4
 
 
+def _validate_tooltips(tooltips: dict, name: str) -> str | None:
+    """Validate that ``tooltips`` matches the documented shape.
+
+    Each value must itself be a dict (with title/desc/ref keys, per the
+    docstring on render_report). When a caller passes
+    ``{node_id: "string"}`` the downstream ``_enrich_tooltips`` crashes
+    deep with ``ValueError: dictionary update sequence element ...``.
+    Validate at the entry point so callers get a clean error and the
+    crash never reaches the helper.
+
+    Returns an error message describing the first bad entry, or ``None``
+    when the shape is valid.
+    """
+    if not isinstance(tooltips, dict):
+        return f"{name} must be a dict, got {type(tooltips).__name__}"
+    for node_id, meta in tooltips.items():
+        if not isinstance(meta, dict):
+            return (
+                f"{name}[{node_id!r}] must be a dict with keys "
+                f"title, desc, ref - got {type(meta).__name__}"
+            )
+    return None
+
+
 def _enrich_tooltips(
     tooltips: dict,
     categories: dict,
@@ -769,6 +793,13 @@ async def render_report(
     """
     if not consultation_id or not consultation_id.strip():
         return {"error": "consultation_id is required"}
+
+    err = _validate_tooltips(tooltips_current, "tooltips_current")
+    if err:
+        return {"error": err}
+    err = _validate_tooltips(tooltips_target, "tooltips_target")
+    if err:
+        return {"error": err}
 
     # -----------------------------------------------------------------------
     # 1. Pull structured data from DB (deterministic, <1s each)
