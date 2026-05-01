@@ -5,7 +5,7 @@ No LLM calls: composes traces from pattern assessments, requires edges,
 and book-derived scenario templates.
 """
 
-from iconsult_mcp.db import get_consultation, get_concept_relationships
+from iconsult_mcp.db import get_consultation, get_concept_relationships, log_consultation_step
 from iconsult_mcp.tools.rubric_data import RUBRIC, normalize_pattern_id, _PATTERN_ID_ALIAS_COMBINED
 from iconsult_mcp.tools.score_architecture import (
     PATTERN_METRICS,
@@ -672,6 +672,18 @@ async def generate_failure_scenarios(
     inverted_count = sum(
         1 for s in scenarios if "inverted_pyramid" in s
     )
+
+    # Log a workflow step so downstream tools (critique_consultation) can detect
+    # that this phase ran. Symmetric with plan_created / quality_rated /
+    # implementation_plan_generated. Persists summary metrics only — the full
+    # scenarios are returned in the response, not duplicated to the step log.
+    log_consultation_step(consultation_id, "failure_scenarios_generated", {
+        "scenario_count": len(scenarios),
+        "total_missing": missing_count,
+        "total_partial": partial_count,
+        "inverted_pyramid_warnings": inverted_count,
+        "chain_coverage": failure_chain["chain_coverage"],
+    })
 
     return {
         "consultation_id": consultation_id,

@@ -12,9 +12,11 @@ from iconsult_mcp.db import get_consultation
 
 logger = logging.getLogger(__name__)
 
-# Expected workflow step types in order
+# Expected workflow step types in order. match_concepts is intentionally
+# excluded — it creates the consultation row (its existence is the proof it
+# ran) but does not write a step. Including it here would produce a false
+# positive "Missing workflow step: match_concepts" on every consultation.
 WORKFLOW_STEPS = [
-    "match_concepts",   # Step 2: concept matching (implicit — creates the consultation)
     "get_subgraph",     # Step 3: graph traversal
     "pattern_assessment",  # Step 3: pattern logging
     "ask_book",         # Step 4: passage retrieval
@@ -309,7 +311,7 @@ def _check_failure_scenarios(stats: dict, issues: list[dict]) -> None:
     """Check that failure scenarios were generated when missing patterns exist."""
     has_missing = stats.get("assessment_statuses", {}).get("missing", 0) > 0
     has_partial = stats.get("assessment_statuses", {}).get("partial", 0) > 0
-    has_scenarios = "failure_scenarios" in stats.get("step_types_present", [])
+    has_scenarios = "failure_scenarios_generated" in stats.get("step_types_present", [])
 
     if (has_missing or has_partial) and not has_scenarios:
         issues.append({
@@ -384,7 +386,7 @@ def _build_prompt_mutations(issues: list[dict], stats: dict) -> list[dict]:
         stats.get("assessment_statuses", {}).get("missing", 0) > 0
         or stats.get("assessment_statuses", {}).get("partial", 0) > 0
     )
-    has_scenarios = "failure_scenarios" in stats.get("step_types_present", [])
+    has_scenarios = "failure_scenarios_generated" in stats.get("step_types_present", [])
     if has_gaps and not has_scenarios:
         mutations.append({
             "action": "generate_failure_scenarios",
