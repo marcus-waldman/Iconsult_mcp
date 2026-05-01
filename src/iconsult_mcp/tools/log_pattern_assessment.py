@@ -21,6 +21,8 @@ async def log_pattern_assessment(
     failure_context: dict | None = None,
     category: str = "",
     indicators: list[dict] | None = None,
+    source_book_id: str | None = None,
+    canonical_concept_id: str | None = None,
 ) -> dict:
     """Log a pattern assessment to a consultation's step log.
 
@@ -40,6 +42,16 @@ async def log_pattern_assessment(
         indicators: List of indicator assessments.
             Each: {"text": str, "met": bool, "na": bool (optional)}.
             When provided, status is auto-computed unless "not_applicable".
+        source_book_id: Optional Phase 4d provenance — which book this
+            pattern's evidence came from (e.g., "gulli_2025"). Free-form;
+            no validation. Surfaced through `_get_pattern_assessments`
+            into downstream tools (failure_scenarios, render_report) for
+            attribution in multi-book consultations.
+        canonical_concept_id: Optional Phase 4d provenance — the canonical
+            cluster ID (`{project_id}__{slug}`) the assessed concept
+            belongs to. Free-form; no validation here. score_architecture
+            still keys on `pattern_id` resolved through the rubric
+            aliases — this field is purely for attribution.
     """
     if not consultation_id or not consultation_id.strip():
         return {"error": "consultation_id is required"}
@@ -112,6 +124,11 @@ async def log_pattern_assessment(
     if failure_context and isinstance(failure_context, dict):
         step_data["failure_context"] = failure_context
 
+    if source_book_id:
+        step_data["source_book_id"] = source_book_id
+    if canonical_concept_id:
+        step_data["canonical_concept_id"] = canonical_concept_id
+
     log_consultation_step(consultation_id, "pattern_assessment", step_data)
 
     result = {
@@ -123,6 +140,10 @@ async def log_pattern_assessment(
         "category": category,
         "level": level,
     }
+    if source_book_id:
+        result["source_book_id"] = source_book_id
+    if canonical_concept_id:
+        result["canonical_concept_id"] = canonical_concept_id
     if warnings:
         result["warnings"] = warnings
     return result

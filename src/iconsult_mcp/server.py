@@ -151,6 +151,8 @@ TOOL_DISPATCH = {
         evidence=args.get("evidence", ""),
         maturity_level=args.get("maturity_level", 1),
         failure_context=args.get("failure_context"),
+        source_book_id=args.get("source_book_id"),
+        canonical_concept_id=args.get("canonical_concept_id"),
     ),
     "validate_subagent": lambda args: validate_subagent(
         response=args.get("response", {}),
@@ -847,6 +849,24 @@ async def list_tools() -> list[Tool]:
                             "Fields: code_refs (list of {file, line, snippet}), "
                             "failure_mode (string describing what breaks), "
                             "depends_on (list of pattern_ids this depends on)"
+                        ),
+                    },
+                    "source_book_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional. Which book this pattern's evidence came from "
+                            "(e.g., 'gulli_2025'). Pure provenance — no validation, "
+                            "no behaviour change to score_architecture. Surfaced "
+                            "downstream into failure_scenarios and render_report "
+                            "for attribution in multi-book consultations."
+                        ),
+                    },
+                    "canonical_concept_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional. The canonical cluster ID "
+                            "({project_id}__{slug}) the assessed concept belongs to "
+                            "in a project-scoped consultation. Pure provenance."
                         ),
                     },
                 },
