@@ -65,6 +65,25 @@ BOOKS: dict[str, dict] = {
         # Regenerate via `py scripts/synthesize_gulli_index.py`.
         "index_filename": "Gulli - 2025 - INDEX-page-numbered.md",
     },
+    "bratanic_2025": {
+        "title": "Essential GraphRAG: Knowledge Graph-Enhanced RAG",
+        "authors": "Bratanič & Hane",
+        "year": 2025,
+        "altitude": "implementation",
+        "is_oracle": False,
+        "subdir": "bratanic_2025",
+        # Conventional technical-book index (lowercase common-noun headwords),
+        # unlike the patterns books' Capitalized pattern names. Tells
+        # parse_index to keep lowercase entries. Default when absent: "patterns".
+        "index_style": "conventional",
+        # Corpus files derived from the single Mathpix export by
+        # `scripts/prepare_bratanic_2025.py` (book trimmed to chapters 1-8;
+        # Appendix A + references + marketing excluded). The back-of-book index
+        # is already in arsanjani-style letter-divider format — no synthesize
+        # step (unlike gulli_2025).
+        "book_filename": "Bratanic and Hane - 2025 - Essential GraphRAG.md",
+        "index_filename": "Bratanic and Hane - 2025 - INDEX.md",
+    },
 }
 
 

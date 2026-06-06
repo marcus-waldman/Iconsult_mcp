@@ -1,6 +1,6 @@
 # Iconsult MCP
 
-Multi-agent architecture consultant MCP server backed by a knowledge graph extracted from *"Agentic Architectural Patterns for Building Multi-Agent Systems"* (Arsanjani & Bustos, Packt 2026).
+Multi-agent architecture consultant MCP server backed by per-book knowledge graphs from a three-book corpus: *"Agentic Architectural Patterns for Building Multi-Agent Systems"* (Arsanjani & Bustos, Packt 2026 — oracle/rubric source), *"Agentic Design Patterns"* (Gulli, 2025), and *"Essential GraphRAG"* (Bratanič & Hane, Manning 2025).
 
 ## Architecture
 - Python MCP server using stdio transport
@@ -99,11 +99,12 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 7. OFFER IMPLEMENTATION PLAN — ask user if they want a step-by-step plan; if yes, `generate_implementation_plan`; recommend fresh conversation for implementation using `get_implementation_plan` + `update_plan_step`
 
 ## Literature
-- Per-book layout: `literature/{book_id}/{book.md, index.md}` (e.g., `literature/arsanjani_2026/`, `literature/gulli_2025/`)
+- Per-book layout: `literature/{book_id}/{book.md, index.md}` (e.g., `literature/arsanjani_2026/`, `literature/gulli_2025/`, `literature/bratanic_2025/`)
 - File names + book metadata live in `BOOKS` registry in `config.py`; resolve via `get_book_paths(book_id)`
 - Mathpix-extracted LaTeX-flavored markdown (uses `\section*{}` not `#`); index format varies by book
 - For `arsanjani_2026` (oracle, mid_level): content starts at line ~985, chapters marked by `\section*{N}` then `\section*{Title}`; index has page numbers
 - For `gulli_2025` (implementation): chapters marked by `\section*{Chapter N: Title}`; original index uses *chapter references* (`Concept - Chapter N: Title`) rather than page numbers, so `scripts/synthesize_gulli_index.py` pre-processes it into an Arsanjani-compatible page-numbered shadow index (`INDEX-page-numbered.md`); the synthesized file is what `parse_index.py` consumes
+- For `bratanic_2025` (implementation): single Mathpix export split by `scripts/prepare_bratanic_2025.py` (book trimmed to chapters 1-8 at line 3905 — Appendix A/references/marketing excluded; back-of-book index extracted to its own INDEX.md, already page-numbered). Conventional index with lowercase headwords: `index_style: "conventional"` in `BOOKS` makes `parse_index` skip the lowercase sub-entry heuristic (default `"patterns"` preserves arsanjani/gulli behaviour)
 
 ## Pipeline
 - Every phase script accepts `--book <book_id>` (default `arsanjani_2026`); IDs and queries are book-scoped
@@ -117,6 +118,7 @@ Multi-agent architecture consultant MCP server backed by a knowledge graph extra
 - `extract_indicators.py` — one-time: mines Ch. 12 + source chapters to produce `rubric_data.py` with binary indicators per pattern
 - `generate_book_summary.py --book <id> {--draft|--commit|--show}` — Phase 2a: Claude drafts a triage-oriented summary (`--draft` writes to `literature/{book_id}/summary.md`, no DB write), user reviews/edits, then `--commit` embeds it and updates `books.summary` + `books.summary_embedding` via `set_book_summary` (UPDATE, doesn't touch other columns)
 - `synthesize_gulli_index.py` — one-shot preprocessor for the `gulli_2025` index (chapter-reference format → Arsanjani-style page-numbered); regenerate by re-running if the upstream INDEX.md changes
+- `prepare_bratanic_2025.py` — one-shot: splits the bratanic_2025 Mathpix export into the trimmed book file + INDEX.md (source path via `--src`; anchor sanity-checks fail loudly if the export changes)
 - `align_book_pair.py --book-a X --book-b Y` — Phase 3c: cosine-shortlists cross-book concept pairs (top-k per side above threshold), batch-adjudicates un-cached pairs to Claude, persists verdicts to `concept_alignment_cache`. Idempotent: re-runs are no-ops thanks to the cache. `--force` re-adjudicates everything. Reusable by `build_project_kg`
 - Orchestrator: `run_pipeline.py --book <id>` — runs all phases for one book; `--reset` clears that book's metadata only
 

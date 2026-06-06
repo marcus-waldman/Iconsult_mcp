@@ -102,10 +102,44 @@ def _build_gulli_2025_boundaries() -> dict:
     }
 
 
+# --- bratanic_2025 ----------------------------------------------------------
+# Source: Tomaž Bratanič & Oskar Hane, "Essential GraphRAG: Knowledge
+# Graph-Enhanced RAG" (Manning, July 2025), 176 pages.
+#
+# Single Mathpix export, split into corpus files by
+# `scripts/prepare_bratanic_2025.py` (book = chapters 1-8 only; Appendix A,
+# references, and marketing trimmed off). `line_start` values use Python
+# splitlines() numbering — verified against the trimmed book file via
+# `scripts/prepare_bratanic_2025.py` anchors. Chapters 2/4/7 head with a
+# `\title{}` (or plain) line rather than `\section*{}`, so their `line_start`
+# anchors on the chapter's first `\section*{This chapter covers}` marker.
+# `page_start` values come from the book's `contents` TOC (lines 64-124).
+# The book has no Parts, so every chapter is part 1.
+BRATANIC_2025_CHAPTERS: list[dict] = [
+    {"number": 1, "title": "Improving LLM accuracy",                              "part": 1, "page_start": 1,   "line_start": 218},
+    {"number": 2, "title": "Vector similarity search and hybrid search",         "part": 1, "page_start": 17,  "line_start": 474},
+    {"number": 3, "title": "Advanced vector retrieval strategies",               "part": 1, "page_start": 30,  "line_start": 954},
+    {"number": 4, "title": "Generating Cypher queries from natural language questions", "part": 1, "page_start": 45, "line_start": 1334},
+    {"number": 5, "title": "Agentic RAG",                                         "part": 1, "page_start": 56,  "line_start": 1706},
+    {"number": 6, "title": "Constructing knowledge graphs with LLMs",            "part": 1, "page_start": 70,  "line_start": 2220},
+    {"number": 7, "title": "Microsoft's GraphRAG implementation",                "part": 1, "page_start": 88,  "line_start": 2692},
+    {"number": 8, "title": "RAG application evaluation",                          "part": 1, "page_start": 116, "line_start": 3586},
+]
+BRATANIC_2025_CONTENT_START_LINE = 218
+
+
+def _build_bratanic_2025_boundaries() -> dict:
+    return {
+        "content_start_line": BRATANIC_2025_CONTENT_START_LINE,
+        "chapters": list(BRATANIC_2025_CHAPTERS),
+    }
+
+
 # Per-book chapter_boundaries builders. Add new entries as books are onboarded.
 _BOUNDARY_BUILDERS = {
     "arsanjani_2026": _build_arsanjani_2026_boundaries,
     "gulli_2025": _build_gulli_2025_boundaries,
+    "bratanic_2025": _build_bratanic_2025_boundaries,
 }
 
 

@@ -18,7 +18,7 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from iconsult_mcp.config import get_book_paths, list_registered_books
+from iconsult_mcp.config import BOOKS, get_book_paths, list_registered_books
 from iconsult_mcp.db import get_connection
 
 DEFAULT_BOOK_ID = "arsanjani_2026"
@@ -97,8 +97,17 @@ def parse_page_refs(text: str) -> list[int]:
     return sorted(pages)
 
 
-def is_structural_subentry(name: str) -> bool:
-    """Check if a line is a structural sub-entry (not a standalone concept)."""
+def is_structural_subentry(name: str, index_style: str = "patterns") -> bool:
+    """Check if a line is a structural sub-entry (not a standalone concept).
+
+    `index_style` controls the lowercase heuristic:
+      - "patterns" (arsanjani/gulli): concept headwords are Capitalized pattern
+        names, so a lowercase-leading line is treated as a structural sub-entry.
+      - "conventional" (e.g. bratanic_2025): an ordinary technical-book index
+        whose real headwords are lowercase common nouns ("hybrid search",
+        "context recall"); the lowercase rule is skipped so they survive.
+    The explicit STRUCTURAL_SUBENTRIES set is applied regardless of style.
+    """
     normalized = name.lower().strip().rstrip(":")
     # Remove leading dash/bullet
     normalized = re.sub(r"^[-•*]\s*", "", normalized)
@@ -106,11 +115,11 @@ def is_structural_subentry(name: str) -> bool:
     if normalized in STRUCTURAL_SUBENTRIES:
         return True
 
-    # Patterns like "compliance request, routing" or "loan application lifecycle"
-    # These are examples/specifics, not standalone concepts
-    # But named patterns like "Blackboard Knowledge Hub" are concepts
-    # Heuristic: if it starts lowercase, it's likely a sub-entry
-    if name.strip() and name.strip()[0].islower():
+    # Patterns-book heuristic: lines like "compliance request, routing" or
+    # "loan application lifecycle" are examples/specifics, not standalone
+    # concepts, while named patterns like "Blackboard Knowledge Hub" are. A
+    # lowercase first letter signals a sub-entry. Conventional indexes opt out.
+    if index_style == "patterns" and name.strip() and name.strip()[0].islower():
         return True
 
     return False
@@ -123,6 +132,9 @@ def parse_index(index_path: Path, book_id: str) -> list[dict]:
     """
     text = index_path.read_text(encoding="utf-8")
     lines = text.splitlines()
+
+    # Per-book index style controls the lowercase sub-entry heuristic.
+    index_style = BOOKS.get(book_id, {}).get("index_style", "patterns")
 
     concepts = {}  # name -> set of pages
     in_table = False
@@ -148,7 +160,7 @@ def parse_index(index_path: Path, book_id: str) -> list[dict]:
             if m:
                 name = m.group(1).strip().rstrip(",")
                 pages = parse_page_refs(m.group(2))
-                if not is_structural_subentry(name) and pages:
+                if not is_structural_subentry(name, index_style) and pages:
                     if name not in concepts:
                         concepts[name] = set()
                     concepts[name].update(pages)
@@ -186,7 +198,7 @@ def parse_index(index_path: Path, book_id: str) -> list[dict]:
 
             all_pages = set(pages_from_name + pages_from_rest)
 
-            if name and not is_structural_subentry(name):
+            if name and not is_structural_subentry(name, index_style):
                 if name not in concepts:
                     concepts[name] = set()
                 concepts[name].update(all_pages)
@@ -196,7 +208,7 @@ def parse_index(index_path: Path, book_id: str) -> list[dict]:
                 if rest_name_match:
                     sub_name = rest_name_match.group(1).strip()
                     sub_page = int(rest_name_match.group(2))
-                    if not is_structural_subentry(sub_name):
+                    if not is_structural_subentry(sub_name, index_style):
                         if sub_name not in concepts:
                             concepts[sub_name] = set()
                         concepts[sub_name].add(sub_page)
@@ -212,7 +224,7 @@ def parse_index(index_path: Path, book_id: str) -> list[dict]:
             # Also "354 patterncontext355" -> pages=[354, 355]
             pages = parse_page_refs(page_text)
 
-            if not is_structural_subentry(name) and pages:
+            if not is_structural_subentry(name, index_style) and pages:
                 if name not in concepts:
                     concepts[name] = set()
                 concepts[name].update(pages)
@@ -224,7 +236,7 @@ def parse_index(index_path: Path, book_id: str) -> list[dict]:
             name = m.group(1).strip()
             pages = parse_page_refs(m.group(2))
 
-            if not is_structural_subentry(name) and pages:
+            if not is_structural_subentry(name, index_style) and pages:
                 if name not in concepts:
                     concepts[name] = set()
                 concepts[name].update(pages)
@@ -237,7 +249,7 @@ def parse_index(index_path: Path, book_id: str) -> list[dict]:
 
         # Lines that are just text (no numbers) - potential concept names waiting for pages
         if not re.search(r"\d", line) and not line.startswith("\\"):
-            if not is_structural_subentry(line):
+            if not is_structural_subentry(line, index_style):
                 orphan_names.append(line)
             continue
 
