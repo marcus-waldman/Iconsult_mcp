@@ -20,5 +20,7 @@ literature/**
 !literature/*/
 !literature/*/summary.md
 data/
-.claude/
+# Local Claude Code config is gitignored, except project skills (versioned as project assets).
+.claude/*
+!.claude/skills/
 demo/
