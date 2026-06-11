@@ -126,7 +126,26 @@ Decide how many retrieval prongs the question needs:
   natural seams (e.g. "compare A and B under failure" → {what A does, what B
   does, how each behaves under failure}). **Hard cap: 4 facets.**
 
-Emit a one-line note to the user: the facets you'll fan out on. Keep it terse.
+### Intent classification (per facet)
+
+Tag each facet with ONE intent. The intent selects the retrieval strategy the
+subagent applies (the routing table below), so relational questions lead with
+the graph and fact lookups lead with passages. In-context labeling — no tool
+calls.
+
+| Intent | Recognize it by | Subagent retrieval strategy |
+|---|---|---|
+| `factual` | "what is X", "define X", "how does X work" | Textual-heavy: `ask_book` `max_passages=4`; `get_subgraph` `max_hops=1` for light context only |
+| `relational` | "how does X relate to Y", "what depends on / requires X" | Structural-first: `get_subgraph` `max_hops=2` BEFORE `ask_book`, then scope `ask_book` to the concepts the subgraph surfaced |
+| `comparative` | "X vs Y", "compare X and Y", "trade-offs between X and Y" | Two seeds: union both concepts' subgraphs; pull passages for EACH side |
+| `overview/global` | "what does the corpus say about X broadly", "survey/overview of X" | Default both-prong (`max_hops=2`, `max_passages=4`). **Flagged `global` — O1b/G1 will later route this to global cluster-summary search** |
+
+A facet inherits the question's intent unless the split changed it (e.g. one side
+of a comparison may itself be `factual`). When unsure, default to
+`overview/global` — it runs the full both-prong path and loses nothing.
+
+Emit a one-line note to the user: the facets you'll fan out on, each tagged with
+its **intent** label. Keep it terse.
 
 ### Query rewriting (per facet, in-context — no tool calls)
 
@@ -161,8 +180,8 @@ final answer) and the **`retrieval_query`** (a search aid only).
 Spawn **one subagent per facet**, all in a **single message** (multiple `Agent`
 tool calls, `subagent_type: general-purpose`) so they run concurrently. Give
 each subagent EXACTLY this brief, substituting the facet text, its
-`retrieval_query`, and `PROJECT_ID` (omit the `project_id` arg entirely in
-`--fast` legacy mode):
+`retrieval_query`, its `intent`, and `PROJECT_ID` (omit the `project_id` arg
+entirely in `--fast` legacy mode):
 
 > You are a retrieval prong for one facet of a corpus question. You are given the
 > ORIGINAL `facet` (what your distilled answer must address) and a
@@ -173,15 +192,28 @@ each subagent EXACTLY this brief, substituting the facet text, its
 > MCP tools (`match_concepts`, `get_subgraph`, `ask_book` — they may be exposed
 > as `mcp__<server>__<name>`; if they aren't directly callable, load them first
 > with ToolSearch `select:match_concepts,get_subgraph,ask_book`). Do BOTH a
-> structural and a textual retrieval, then distill. Steps:
+> structural and a textual retrieval, then distill.
+>
+> ROUTING — this facet's intent is **<INTENT>**; weight the two prongs per that
+> intent's strategy (adjust `max_hops` / `max_passages` / prong order in the
+> steps below accordingly):
+> - `factual` → textual-heavy: `ask_book` `max_passages=4`; `get_subgraph` at
+>   `max_hops=1` for light context only.
+> - `relational` → structural-first: run `get_subgraph` at `max_hops=2` BEFORE
+>   `ask_book`, then scope `ask_book` to the concepts the subgraph surfaced.
+> - `comparative` → seed BOTH compared concepts; union their subgraphs; pull
+>   passages for EACH side.
+> - `overview/global` → default both-prong (`max_hops=2`, `max_passages=4`).
+>
+> Steps (defaults shown; override per ROUTING):
 >
 > 1. `match_concepts(project_description = "<RETRIEVAL_QUERY>", project_id = "<PROJECT_ID>")`
 >    → take the top 3 matched concept ids and the `consultation_id`.
-> 2. STRUCTURAL: `get_subgraph(concept_ids = <top 3 ids>, max_hops = 2,
+> 2. STRUCTURAL: `get_subgraph(concept_ids = <top 3 ids>, max_hops = 2 (per ROUTING),
 >    include_descriptions = true, consultation_id = "<CID>")` → read how the
 >    concepts relate (edge types, neighbors).
 > 3. TEXTUAL: `ask_book(question = "<RETRIEVAL_QUERY>", concept_ids = <top 3 ids>,
->    max_passages = 4, consultation_id = "<CID>")` → read the passages; note the
+>    max_passages = 4 (per ROUTING), consultation_id = "<CID>")` → read the passages; note the
 >    `book_id` on each. Optionally fire ONE follow-up `ask_book` using a
 >    returned `suggested_question` if it sharpens the answer.
 > 4. DISTILL and return **ONLY** this JSON — do NOT paste raw passages or raw
