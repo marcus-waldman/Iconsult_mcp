@@ -292,20 +292,48 @@ pass).
 
 ## Phase 4 — Adversarial verify (SUBAGENT) — skip if `--fast`
 
-Spawn ONE verifier subagent. Hand it the draft claim→citation pairs and tell it
-to **try to refute each claim**:
+**Step A — decompose into atomic statements (main thread).** Break the
+synthesized draft answer into **atomic statements** before verifying. This
+splitter definition is **shared with E1's faithfulness metric** (Tier 2) — keep
+it stable so E1 can reuse it verbatim:
 
-> You are an adversarial fact-checker for a corpus answer. For each claim below,
-> verify it is actually supported by its cited passage. You MAY re-fetch the
-> source with `ask_book(question = "<claim restated>", project_id =
-> "<PROJECT_ID>", max_passages = 3)` to check. Default to "unsupported" when the
-> citation does not clearly back the claim. Return ONLY:
+> **Atomic decomposition rules.** An *atomic statement* asserts exactly ONE
+> verifiable fact. To produce the list from the draft answer:
+> 1. **One fact each** — split every conjunction ("and", "but", "which also",
+>    semicolons, trailing relative clauses) into separate statements.
+> 2. **Resolve referents** — replace pronouns and deictics ("it", "this", "the
+>    latter", "that pattern") with the explicit concept name.
+> 3. **Self-contained** — each statement must be checkable on its own, without
+>    reading the others.
+> 4. **Carry its citation(s)** — each statement keeps the `[book_id]` /
+>    `section_id` citation(s) the draft built it from.
+> 5. **Drop pure connective/framing text** (transitions, hedges) — keep only
+>    factual assertions.
+
+**Step B — verify each statement (SUBAGENT).** Spawn ONE verifier subagent. Hand
+it the atomic-statement list (each with its citation) and tell it to **try to
+refute each statement independently**:
+
+> You are an adversarial fact-checker for a corpus answer. You are given a list
+> of ATOMIC statements, each with its citation. For EACH statement independently,
+> verify the cited passage actually supports THAT statement. You MAY re-fetch the
+> source with `ask_book(question = "<statement restated>", project_id =
+> "<PROJECT_ID>", max_passages = 3)` to check. Judge support against the
+> statement's own wording; default to "no" when the citation does not clearly
+> back it. Return ONLY one verdict per atomic statement:
 > ```json
-> {"verdicts": [{"claim": "...", "supported": "yes|partial|no", "note": "<=20 words"}]}
+> {"verdicts": [{"statement": "...", "supported": "yes|partial|no", "note": "<=20 words"}]}
 > ```
 
-Apply the verdicts: **drop or visibly flag** any `no` claim, soften any
-`partial` claim. Only verified content survives into the final answer.
+**Step C — rebuild from the verdicts (main thread).** Apply the verdicts at the
+atomic level, then reassemble surviving statements into prose:
+- `yes` → keep verbatim-supported.
+- `partial` → soften to hedged wording that the citation does support.
+- `no` → drop, or visibly flag as unverified.
+
+Because conjuncts are now separate statements, a compound claim whose unsupported
+half rode along on a supported half is caught — the uncited conjunct gets its own
+`no`. Only atomic-verified content survives into the final answer.
 
 ---
 
