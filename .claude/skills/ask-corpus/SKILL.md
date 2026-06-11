@@ -128,27 +128,59 @@ Decide how many retrieval prongs the question needs:
 
 Emit a one-line note to the user: the facets you'll fan out on. Keep it terse.
 
+### Query rewriting (per facet, in-context — no tool calls)
+
+Before fanning out, derive a `retrieval_query` for each facet — a rewrite tuned
+for embedding match. This is pure main-thread reasoning (**no extra tool
+calls**), so it stays inside the context-efficiency contract. Two moves:
+
+- **Step-back** — for narrow, jargon- or acronym-heavy facets, generalize to the
+  underlying book concept so the embedding lands on the right sections. e.g.
+  "how does the AEO loop bound retries?" → `retrieval_query`: "retry and
+  termination control in evaluator-optimizer agent loops".
+- **HyDE-lite** — when the raw phrasing is unlike book prose, write a 1–2
+  sentence *hypothetical answer* in book-register prose and use THAT as the
+  `retrieval_query`. e.g. "what's reflection?" → `retrieval_query`: "Reflection
+  is an agentic pattern in which an agent critiques and revises its own output,
+  often via a separate evaluator step, before finalizing."
+
+When the facet is already a clean conceptual phrase, set `retrieval_query` =
+facet (no rewrite fires). Each facet now carries a pair: the **original facet**
+(used for the distillate's `facet` field, citation-relevance judging, and the
+final answer) and the **`retrieval_query`** (a search aid only).
+
+> ⚠️ The `retrieval_query`'s hypothetical/generalized wording must NEVER leak
+> into the answer or into citations. Every claim and every citation is judged
+> against the user's ORIGINAL facet/question — the Phase 4 verify enforces this,
+> keeping HyDE phrasing out of the cited output.
+
 ---
 
 ## Phase 2 — Parallel retrieval fan-out (SUBAGENTS — the isolation core)
 
 Spawn **one subagent per facet**, all in a **single message** (multiple `Agent`
 tool calls, `subagent_type: general-purpose`) so they run concurrently. Give
-each subagent EXACTLY this brief, substituting the facet text and `PROJECT_ID`
-(omit the `project_id` arg entirely in `--fast` legacy mode):
+each subagent EXACTLY this brief, substituting the facet text, its
+`retrieval_query`, and `PROJECT_ID` (omit the `project_id` arg entirely in
+`--fast` legacy mode):
 
-> You are a retrieval prong for one facet of a corpus question. Use the Iconsult
+> You are a retrieval prong for one facet of a corpus question. You are given the
+> ORIGINAL `facet` (what your distilled answer must address) and a
+> `retrieval_query` (a search-optimized rewrite of it). Use the `retrieval_query`
+> as the query string for `match_concepts` and `ask_book`, but judge every
+> citation's relevance against the ORIGINAL facet — the rewrite is a search aid
+> only and may contain hypothetical/generalized wording. Use the Iconsult
 > MCP tools (`match_concepts`, `get_subgraph`, `ask_book` — they may be exposed
 > as `mcp__<server>__<name>`; if they aren't directly callable, load them first
 > with ToolSearch `select:match_concepts,get_subgraph,ask_book`). Do BOTH a
 > structural and a textual retrieval, then distill. Steps:
 >
-> 1. `match_concepts(project_description = "<FACET>", project_id = "<PROJECT_ID>")`
+> 1. `match_concepts(project_description = "<RETRIEVAL_QUERY>", project_id = "<PROJECT_ID>")`
 >    → take the top 3 matched concept ids and the `consultation_id`.
 > 2. STRUCTURAL: `get_subgraph(concept_ids = <top 3 ids>, max_hops = 2,
 >    include_descriptions = true, consultation_id = "<CID>")` → read how the
 >    concepts relate (edge types, neighbors).
-> 3. TEXTUAL: `ask_book(question = "<FACET>", concept_ids = <top 3 ids>,
+> 3. TEXTUAL: `ask_book(question = "<RETRIEVAL_QUERY>", concept_ids = <top 3 ids>,
 >    max_passages = 4, consultation_id = "<CID>")` → read the passages; note the
 >    `book_id` on each. Optionally fire ONE follow-up `ask_book` using a
 >    returned `suggested_question` if it sharpens the answer.
@@ -170,7 +202,8 @@ each subagent EXACTLY this brief, substituting the facet text and `PROJECT_ID`
 > }
 > ```
 >
-> Every claim in `answer` must trace to a `citations` entry. Keep it tight.
+> Every claim in `answer` must trace to a `citations` entry, and each citation
+> must support the ORIGINAL facet — not the `retrieval_query`. Keep it tight.
 
 Collect the compact JSON from each subagent. That — not the raw retrieval — is
 all that enters this thread.
