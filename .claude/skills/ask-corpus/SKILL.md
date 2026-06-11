@@ -259,6 +259,37 @@ Hold this as a draft list of {claim → citation} pairs for verification.
 
 ---
 
+## Phase 3b — Answer-critic re-retrieval (main thread; skip if `--fast`)
+
+Before the adversarial verify, run ONE cheap in-context critique of the merged
+distillates — **no tool calls in this thread**; you are only reading the compact
+JSON the subagents already returned. Ask: does any facet that the question
+actually needs have `confidence: low`, OR a non-empty `gaps` field naming
+something the user asked about that the corpus might still answer?
+
+- **No** (every needed facet is `high`/`medium` confidence with no
+  question-relevant gap) → fire **zero** extra subagents and go straight to
+  Phase 4. This is the common path and adds no cost.
+- **Yes** → fire **exactly ONE** re-retrieval subagent, using the **same Phase 2
+  brief**, with:
+  - `retrieval_query` = the gap restated as a focused search query (apply the R1
+    rewriting moves), and
+  - `intent` = re-classified for the gap per O1's table (often `relational` or
+    `factual` even when the parent facet was broader).
+
+  Merge its distillate back into the Phase 3 synthesis (revise the draft
+  claim→citation list) before continuing.
+
+> **Hard cap: 1 critic round.** Mirrors the `critique_consultation` 1-iteration
+> convention. Even if the re-retrieval still leaves the gap open, do NOT loop
+> again — carry the gap honestly into the Phase 5 gaps footer. One round bounds
+> cost and latency.
+
+In `--fast` mode, skip this phase entirely (consistent with skipping the verify
+pass).
+
+---
+
 ## Phase 4 — Adversarial verify (SUBAGENT) — skip if `--fast`
 
 Spawn ONE verifier subagent. Hand it the draft claim→citation pairs and tell it
