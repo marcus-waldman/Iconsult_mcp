@@ -151,6 +151,14 @@ async def run_all(book_id: str, phases: list[str] | None = None):
         print("\n" + "=" * 60)
         print(f"PHASE 4: Building final graph ({book_id})")
         print("=" * 60)
+        # Guarantee section content is populated BEFORE embedding. Section
+        # embeddings are built from title + content, so missing content
+        # silently yields title-only vectors (the bug that left gulli_2025 /
+        # arsanjani_2026 with empty passages). Idempotent: a no-op (returns 0)
+        # for books whose content is already populated.
+        from scripts.populate_content import populate_content
+        populated = populate_content(book_id)
+        print(f"Section content ensured: populated {populated} section(s) (0 = already present)")
         from scripts.build_graph import run_phase4
         await run_phase4(book_id)
 

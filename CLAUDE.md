@@ -114,7 +114,7 @@ Multi-agent architecture consultant MCP server backed by per-book knowledge grap
 - Phase 2: `tag_concepts.py` — Claude tags concepts to sections
 - Phase 3: `discover_relationships.py` — explicit (Claude) + semantic (embeddings) relationships
 - Phase 4: `build_graph.py` — deduplicate, validate, final embeddings (uses section content for embeddings)
-- `populate_content.py` — fills `sections.content` from book markdown (run before phase 4 re-embed)
+- `populate_content.py` — fills `sections.content` from book markdown; exposes `populate_content(book_id)`, auto-run by `run_pipeline.py` phase 4 before re-embed (idempotent; also runnable standalone). Section embeddings = title + content, so content MUST exist before embedding
 - `extract_indicators.py` — one-time: mines Ch. 12 + source chapters to produce `rubric_data.py` with binary indicators per pattern
 - `generate_book_summary.py --book <id> {--draft|--commit|--show}` — Phase 2a: Claude drafts a triage-oriented summary (`--draft` writes to `literature/{book_id}/summary.md`, no DB write), user reviews/edits, then `--commit` embeds it and updates `books.summary` + `books.summary_embedding` via `set_book_summary` (UPDATE, doesn't touch other columns)
 - `synthesize_gulli_index.py` — one-shot preprocessor for the `gulli_2025` index (chapter-reference format → Arsanjani-style page-numbered); regenerate by re-running if the upstream INDEX.md changes
